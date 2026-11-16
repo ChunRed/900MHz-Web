@@ -5,7 +5,7 @@ export default function Document() {
     <Html lang="zh-Hant">
       <Head>
         <link rel="manifest" href="/manifest.json" />
-        <meta name="theme-color" content="#ffffff" />
+        <meta name="theme-color" content="#000000" />
         <meta name="application-name" content="900MHz" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="mobile-web-app-capable" content="yes" />
