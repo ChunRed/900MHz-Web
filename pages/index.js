@@ -1,65 +1,54 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Head from "next/head";
-import * as THREE from "three";
 import TelephoneCanvas from "@/components/scene/TelephoneCanvas";
 import HeaderTitle from "@/components/ui/HeaderTitle";
-import InfoPanel from "@/components/ui/InfoPanel";
 import BackButton from "@/components/ui/BackButton";
 import FooterText from "@/components/ui/FooterText";
 import SideArrowButtons from "@/components/ui/SideArrowButtons";
 import ThemeToggleButton from "@/components/ui/ThemeToggleButton";
 import ActiveDigitPointer from "@/components/ui/ActiveDigitPointer";
 import ModelProjectionFrame from "@/components/ui/ModelProjectionFrame";
+import ClickModelHint from "@/components/ui/ClickModelHint";
+import SegmentInputHint from "@/components/ui/SegmentInputHint";
+import SendResultModal from "@/components/ui/SendResultModal";
+import MainSevenSegmentBubble from "@/components/ui/MainSevenSegmentBubble";
+import OnboardingGuideModal from "@/components/ui/OnboardingGuideModal";
+import AuthorInfoButton from "@/components/ui/AuthorInfoButton";
+import { MOSAIC_DEFAULTS } from "@/components/shaders/mosaicNumericShader";
 import {
   BIG_SEGMENT_ACTIVE_STYLE,
   SMALL_DIGIT_COUNT,
   SMALL_SEGMENT_ACTIVE_STYLE,
 } from "@/components/constants/sevenSegments";
 
+const createEmptySegmentMatrix = () =>
+  Array.from({ length: SMALL_DIGIT_COUNT }, () => Array(7).fill(0));
+
 export default function Home() {
   const resetViewRef = useRef(null);
+  const focusViewRef = useRef(null);
   const mainLightRef = useRef(null);
-  const lightRadiusRef = useRef(Math.hypot(8, 12, 10));
 
-  // 初始畫面預設為夜間模式
+  // 初始畫面預設為夜間模式，並顯示初始操作說明視窗
   const [isDarkMode, setIsDarkMode] = useState(true);
+  const [showOnboardingGuide, setShowOnboardingGuide] = useState(true);
   const [isFocused, setIsFocused] = useState(false);
   const [isCameraSettled, setIsCameraSettled] = useState(false);
   const [arrowPositions, setArrowPositions] = useState(null);
   const [digitPointerPositions, setDigitPointerPositions] = useState(null);
+  const [bottomSegmentPos, setBottomSegmentPos] = useState(null);
   // 目前聯動的小七段顯示器索引 (0 ~ 7，對應第 1 ~ 8 個小七段顯示器)
   const [activeDigitIndex, setActiveDigitIndex] = useState(0);
 
-  // 外輪廓投影框狀態 (即時投影座標與凸包、顯示開關、樣式模式、點擊模型淡出狀態)
+  // 小七段顯示器亮起狀態陣列（8x7 0/1 矩陣）與提示關閉 / 傳送彈窗狀態
+  const [segmentMatrix, setSegmentMatrix] = useState(createEmptySegmentMatrix);
+  const [isInputHintFadingOut, setIsInputHintFadingOut] = useState(false);
+  const [hasDismissedInputHint, setHasDismissedInputHint] = useState(false);
+  const [isSendModalOpen, setIsSendModalOpen] = useState(false);
+
+  // 外輪廓投影框狀態 (即時投影座標與凸包、點擊模型淡出狀態)
   const [projectionFrameData, setProjectionFrameData] = useState(null);
-  const [showProjectionFrame, setShowProjectionFrame] = useState(true);
-  const [projectionFrameMode, setProjectionFrameMode] = useState("both");
   const [isFrameFadingOut, setIsFrameFadingOut] = useState(false);
-
-  // 大小七段顯示器光暈強度倍率
-  const [bigGlowIntensity, setBigGlowIntensity] = useState(
-    BIG_SEGMENT_ACTIVE_STYLE.defaultIntensity
-  );
-  const [smallGlowIntensity, setSmallGlowIntensity] = useState(
-    SMALL_SEGMENT_ACTIVE_STYLE.defaultIntensity
-  );
-
-  const [cameraInfo, setCameraInfo] = useState({
-    azimuth: "0.0",
-    polar: "0.0",
-    rotX: "0.0",
-    rotY: "0.0",
-    rotZ: "0.0",
-    distance: "19.48",
-    zoomPercent: "77",
-  });
-  const [lightInfo, setLightInfo] = useState({
-    azimuth: 38.7,
-    polar: 46.9,
-    posX: "8.00",
-    posY: "12.00",
-    posZ: "10.00",
-  });
 
   const handleSelectPrevDigit = () => {
     setActiveDigitIndex(
@@ -71,36 +60,20 @@ export default function Home() {
     setActiveDigitIndex((prev) => (prev + 1) % SMALL_DIGIT_COUNT);
   };
 
-  const handleResetGlow = () => {
-    setBigGlowIntensity(BIG_SEGMENT_ACTIVE_STYLE.defaultIntensity);
-    setSmallGlowIntensity(SMALL_SEGMENT_ACTIVE_STYLE.defaultIntensity);
-  };
+  useEffect(() => {
+    if (!isInputHintFadingOut) return;
+    const timer = setTimeout(() => {
+      setHasDismissedInputHint(true);
+      setIsInputHintFadingOut(false);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [isInputHintFadingOut]);
 
-  const updateLightByAngles = (azimuthDeg, polarDeg) => {
-    const clampedPolar = Math.max(0.1, Math.min(179.9, polarDeg));
-    const spherical = new THREE.Spherical(
-      lightRadiusRef.current,
-      THREE.MathUtils.degToRad(clampedPolar),
-      THREE.MathUtils.degToRad(azimuthDeg)
-    );
-    const pos = new THREE.Vector3().setFromSpherical(spherical);
-
-    if (mainLightRef.current) {
-      mainLightRef.current.position.copy(pos);
+  const handleSegmentMatrixChange = (nextMatrix, nextActive) => {
+    setSegmentMatrix(nextMatrix);
+    if (nextActive && !hasDismissedInputHint && !isInputHintFadingOut) {
+      setIsInputHintFadingOut(true);
     }
-
-    const fmt = (v) => {
-      const s = v.toFixed(2);
-      return Number(s) === 0 ? "0.00" : s;
-    };
-
-    setLightInfo({
-      azimuth: Number(azimuthDeg.toFixed(1)),
-      polar: Number(polarDeg.toFixed(1)),
-      posX: fmt(pos.x),
-      posY: fmt(pos.y),
-      posZ: fmt(pos.z),
-    });
   };
 
   return (
@@ -123,25 +96,41 @@ export default function Home() {
           isFocused={isFocused}
           isDarkMode={isDarkMode}
           activeDigitIndex={activeDigitIndex}
-          bigGlowIntensity={bigGlowIntensity}
-          smallGlowIntensity={smallGlowIntensity}
+          bigGlowIntensity={BIG_SEGMENT_ACTIVE_STYLE.defaultIntensity}
+          smallGlowIntensity={SMALL_SEGMENT_ACTIVE_STYLE.defaultIntensity}
+          mosaicEnabled
+          mosaicCellSize={MOSAIC_DEFAULTS.cellSize}
+          mosaicThreshold={MOSAIC_DEFAULTS.threshold}
+          mosaicSpeed={MOSAIC_DEFAULTS.speed}
           setIsFocused={setIsFocused}
           setIsCameraSettled={setIsCameraSettled}
           setIsFrameFadingOut={setIsFrameFadingOut}
           setArrowPositions={setArrowPositions}
           setDigitPointerPositions={setDigitPointerPositions}
-          setCameraInfo={setCameraInfo}
+          setBottomSegmentPos={setBottomSegmentPos}
           onUpdateProjectionFrame={setProjectionFrameData}
+          onSegmentMatrixChange={handleSegmentMatrixChange}
           mainLightRef={mainLightRef}
           resetViewRef={resetViewRef}
+          focusViewRef={focusViewRef}
         />
 
-        {/* 相機視角看向模型的外輪廓投影框（0x999999細線條，點擊模型時先fadeout消失才開運鏡） */}
+        {/* 相機視角看向模型的外輪廓投影框（科技風細線與節點，點擊模型時先fadeout消失才開運鏡） */}
         <ModelProjectionFrame
           frameData={projectionFrameData}
-          visible={showProjectionFrame && !isFocused}
+          visible={!isFocused}
           isFadingOut={isFrameFadingOut}
-          mode={projectionFrameMode}
+          isDarkMode={isDarkMode}
+          mode="both"
+        />
+
+        {/* 主畫面「Click 點擊」提示標示（左斜上拉出細線＋標籤，點擊模型時與投影框同步 fadeout） */}
+        <ClickModelHint
+          frameData={projectionFrameData}
+          visible={!isFocused}
+          isFadingOut={isFrameFadingOut}
+          isDarkMode={isDarkMode}
+          onClickModel={() => focusViewRef.current && focusViewRef.current()}
         />
 
         {/* 畫面左上角日 / 夜間模式切換按鈕 */}
@@ -153,11 +142,28 @@ export default function Home() {
         {/* 畫面上方作品標題 */}
         <HeaderTitle isDarkMode={isDarkMode} />
 
+        {/* 主畫面上方八個 2D 小七段顯示器對話框（細框線指向模型上方，尖角隨視角轉動即時調整） */}
+        <MainSevenSegmentBubble
+          segmentMatrix={segmentMatrix}
+          frameData={projectionFrameData}
+          visible={!isFocused}
+          isFadingOut={isFrameFadingOut}
+          isDarkMode={isDarkMode}
+        />
+
         {/* 指向目前所選小七段顯示器的上下飄動箭頭 */}
         <ActiveDigitPointer
           visible={isCameraSettled}
           positions={digitPointerPositions}
           activeDigitIndex={activeDigitIndex}
+          isDarkMode={isDarkMode}
+        />
+
+        {/* 相機到達定位且尚未有任何輸入時，指向大七段中間段往右上斜的雙語輸入提示 */}
+        <SegmentInputHint
+          anchorPos={bottomSegmentPos}
+          visible={isCameraSettled && !hasDismissedInputHint}
+          isFadingOut={isInputHintFadingOut}
           isDarkMode={isDarkMode}
         />
 
@@ -170,29 +176,30 @@ export default function Home() {
           onClickRight={handleSelectNextDigit}
         />
 
-        {/* 畫面右上角相機、光線與光暈狀態控制面板 */}
-        <InfoPanel
-          cameraInfo={cameraInfo}
-          lightInfo={lightInfo}
-          bigGlowIntensity={bigGlowIntensity}
-          smallGlowIntensity={smallGlowIntensity}
-          isDarkMode={isDarkMode}
-          showProjectionFrame={showProjectionFrame}
-          projectionFrameMode={projectionFrameMode}
-          onUpdateLightAngles={updateLightByAngles}
-          onResetLight={() => updateLightByAngles(38.7, 46.9)}
-          onChangeBigGlow={setBigGlowIntensity}
-          onChangeSmallGlow={setSmallGlowIntensity}
-          onResetGlow={handleResetGlow}
-          onToggleProjectionFrame={() => setShowProjectionFrame((prev) => !prev)}
-          onChangeProjectionFrameMode={setProjectionFrameMode}
-        />
+        {/* 右下角作者資訊按鈕 */}
+        <AuthorInfoButton isDarkMode={isDarkMode} />
 
-        {/* 畫面下方返回初始視角按鈕 */}
+        {/* 畫面下方膠囊形按鈕（主畫面為 Send 傳送鈕，點擊模型聚焦後轉變為 Back 按鈕） */}
         <BackButton
           isFocused={isFocused}
           isDarkMode={isDarkMode}
           onBack={() => resetViewRef.current && resetViewRef.current()}
+          onSend={() => setIsSendModalOpen(true)}
+        />
+
+        {/* 傳送內容通知彈窗（未輸入時提示請輸入內容，已輸入時顯示 8x7 小七段亮起狀態與陣列） */}
+        <SendResultModal
+          visible={isSendModalOpen}
+          segmentMatrix={segmentMatrix}
+          isDarkMode={isDarkMode}
+          onClose={() => setIsSendModalOpen(false)}
+        />
+
+        {/* 初始操作說明畫面（確認後上下壓縮收合退場） */}
+        <OnboardingGuideModal
+          visible={showOnboardingGuide}
+          isDarkMode={isDarkMode}
+          onClose={() => setShowOnboardingGuide(false)}
         />
 
         {/* 畫面最下方署名小灰字 */}

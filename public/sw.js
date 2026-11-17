@@ -1,6 +1,5 @@
-const CACHE_NAME = "900mhz-pwa-v1";
+const CACHE_NAME = "900mhz-pwa-v2";
 const PRECACHE_ASSETS = [
-  "/",
   "/manifest.json",
   "/Telephone.glb",
   "/icons/icon-192x192.png",
@@ -39,12 +38,11 @@ self.addEventListener("fetch", (event) => {
 
   const url = new URL(request.url);
 
-  // 略過非同源、API 路由、Socket.io 與 Next.js 開發熱更新請求
+  // 略過非同源、API 路由、Socket.io 與 Next.js 內部資源
   if (
     url.origin !== self.location.origin ||
     url.pathname.startsWith("/api/") ||
-    url.pathname.startsWith("/_next/webpack-hmr") ||
-    url.pathname.startsWith("/_next/hmr")
+    url.pathname.startsWith("/_next/")
   ) {
     return;
   }

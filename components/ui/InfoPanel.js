@@ -12,6 +12,10 @@ export default function InfoPanel({
   isDarkMode,
   showProjectionFrame,
   projectionFrameMode,
+  mosaicEnabled,
+  mosaicCellSize,
+  mosaicThreshold,
+  mosaicSpeed,
   onUpdateLightAngles,
   onResetLight,
   onChangeBigGlow,
@@ -19,6 +23,11 @@ export default function InfoPanel({
   onResetGlow,
   onToggleProjectionFrame,
   onChangeProjectionFrameMode,
+  onToggleMosaic,
+  onChangeMosaicCellSize,
+  onChangeMosaicThreshold,
+  onChangeMosaicSpeed,
+  onResetMosaic,
 }) {
   const [showInfo, setShowInfo] = useState(false);
 
@@ -38,7 +47,7 @@ export default function InfoPanel({
         className={`flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border shadow-sm backdrop-blur-sm transition-all active:scale-95 ${
           isDarkMode
             ? "border-zinc-700/80 bg-zinc-900/85 text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
-            : "border-zinc-200 bg-white/90 text-zinc-700 hover:bg-zinc-100 hover:text-zinc-900"
+            : "border-zinc-800 bg-zinc-900 text-white hover:bg-black"
         }`}
       >
         <svg
@@ -309,6 +318,113 @@ export default function InfoPanel({
                   ))}
                 </div>
               </div>
+            )}
+          </div>
+
+          {/* 數位馬賽克後處理 Uniform 控制區塊 */}
+          <div
+            className={`space-y-2 border-t pt-2.5 ${
+              isDarkMode ? "border-zinc-800" : "border-zinc-200"
+            }`}
+          >
+            <div
+              className={`flex items-center justify-between border-b pb-1 ${borderSubtle}`}
+            >
+              <span className={`font-semibold ${highlightText}`}>
+                數據網格濾鏡 (Mosaic)
+              </span>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={onResetMosaic}
+                  className={`cursor-pointer rounded px-1.5 py-0.5 text-[10px] transition-colors ${
+                    isDarkMode
+                      ? "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+                      : "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800"
+                  }`}
+                >
+                  重置
+                </button>
+                <button
+                  type="button"
+                  onClick={onToggleMosaic}
+                  className={`cursor-pointer rounded px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                    mosaicEnabled
+                      ? isDarkMode
+                        ? "bg-zinc-800 text-white border border-zinc-700"
+                        : "bg-zinc-200 text-zinc-900 border border-zinc-300"
+                      : isDarkMode
+                      ? "text-zinc-500 hover:text-zinc-300"
+                      : "text-zinc-400 hover:text-zinc-600"
+                  }`}
+                >
+                  {mosaicEnabled ? "開啟" : "關閉"}
+                </button>
+              </div>
+            </div>
+
+            {mosaicEnabled && (
+              <>
+                <div className="space-y-1">
+                  <div className="flex justify-between">
+                    <span>網格大小 (uCellSize):</span>
+                    <span className={`font-semibold ${highlightText}`}>
+                      {mosaicCellSize.toFixed(0)} px
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min="8"
+                    max="48"
+                    step="2"
+                    value={mosaicCellSize}
+                    onChange={(e) =>
+                      onChangeMosaicCellSize(parseFloat(e.target.value))
+                    }
+                    className={sliderClass}
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <div className="flex justify-between">
+                    <span>數字門檻 (uThreshold):</span>
+                    <span className={`font-semibold ${highlightText}`}>
+                      {mosaicThreshold.toFixed(2)}
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0.2"
+                    max="0.95"
+                    step="0.02"
+                    value={mosaicThreshold}
+                    onChange={(e) =>
+                      onChangeMosaicThreshold(parseFloat(e.target.value))
+                    }
+                    className={sliderClass}
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <div className="flex justify-between">
+                    <span>跳動速度 (uSpeed):</span>
+                    <span className={`font-semibold ${highlightText}`}>
+                      {mosaicSpeed.toFixed(1)}
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="15"
+                    step="0.5"
+                    value={mosaicSpeed}
+                    onChange={(e) =>
+                      onChangeMosaicSpeed(parseFloat(e.target.value))
+                    }
+                    className={sliderClass}
+                  />
+                </div>
+              </>
             )}
           </div>
         </div>

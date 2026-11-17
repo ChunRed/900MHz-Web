@@ -2,6 +2,14 @@ import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
+import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
+import {
+  MOSAIC_DEFAULTS,
+  createDigitAtlasTexture,
+  createMosaicNumericShader,
+} from "@/components/shaders/mosaicNumericShader";
 import {
   BASE_COLOR,
   BIG_DISPLAY_BACKPLATE_COLOR,
@@ -15,6 +23,7 @@ import {
   SMALL_DIGIT_COUNT,
   SMALL_SEGMENT_ACTIVE_STYLE,
   SMALL_SEGMENT_DEFAULT_COLOR,
+  STANDARD_ABCDEFG_SMALL_SEG_IDS,
   getSegmentInfoByName,
   getSmallSegmentInfoByName,
   isBaseMeshName,
@@ -124,30 +133,62 @@ export default function TelephoneCanvas({
   activeDigitIndex,
   bigGlowIntensity,
   smallGlowIntensity,
+  mosaicEnabled = true,
+  mosaicCellSize = MOSAIC_DEFAULTS.cellSize,
+  mosaicThreshold = MOSAIC_DEFAULTS.threshold,
+  mosaicSpeed = MOSAIC_DEFAULTS.speed,
   setIsFocused,
   setIsCameraSettled,
   setIsFrameFadingOut,
   setArrowPositions,
   setDigitPointerPositions,
+  setBottomSegmentPos,
   setCameraInfo,
   onUpdateProjectionFrame,
+  onSegmentMatrixChange,
   mainLightRef,
   resetViewRef,
+  focusViewRef,
 }) {
   const mountRef = useRef(null);
   const isDarkModeRef = useRef(isDarkMode);
   const activeDigitIndexRef = useRef(activeDigitIndex);
   const bigGlowRef = useRef(bigGlowIntensity);
   const smallGlowRef = useRef(smallGlowIntensity);
+  const mosaicEnabledRef = useRef(mosaicEnabled);
+  const mosaicCellSizeRef = useRef(mosaicCellSize);
+  const mosaicThresholdRef = useRef(mosaicThreshold);
+  const mosaicSpeedRef = useRef(mosaicSpeed);
+  const mosaicPassRef = useRef(null);
   const onUpdateProjectionFrameRef = useRef(onUpdateProjectionFrame);
+  const onSegmentMatrixChangeRef = useRef(onSegmentMatrixChange);
   const sceneObjectsRef = useRef(null);
   const smallSegmentStateRef = useRef(
     Array.from({ length: SMALL_DIGIT_COUNT }, () => ({}))
   );
 
   useEffect(() => {
+    mosaicEnabledRef.current = mosaicEnabled;
+  }, [mosaicEnabled]);
+
+  useEffect(() => {
+    mosaicCellSizeRef.current = mosaicCellSize;
+    mosaicThresholdRef.current = mosaicThreshold;
+    mosaicSpeedRef.current = mosaicSpeed;
+    if (mosaicPassRef.current) {
+      mosaicPassRef.current.uniforms.uCellSize.value = mosaicCellSize;
+      mosaicPassRef.current.uniforms.uThreshold.value = mosaicThreshold;
+      mosaicPassRef.current.uniforms.uSpeed.value = mosaicSpeed;
+    }
+  }, [mosaicCellSize, mosaicThreshold, mosaicSpeed]);
+
+  useEffect(() => {
     onUpdateProjectionFrameRef.current = onUpdateProjectionFrame;
   }, [onUpdateProjectionFrame]);
+
+  useEffect(() => {
+    onSegmentMatrixChangeRef.current = onSegmentMatrixChange;
+  }, [onSegmentMatrixChange]);
 
   useEffect(() => {
     activeDigitIndexRef.current = activeDigitIndex;
@@ -214,6 +255,13 @@ export default function TelephoneCanvas({
       );
       applySmallSegmentAppearance(entry, isLit, smallGlowRef.current, isDarkMode);
     });
+
+    // 同步調整 LED1-4 光暈透明度
+    if (objs.ledHaloSprites) {
+      objs.ledHaloSprites.forEach((sprite) => {
+        sprite.material.opacity = isDarkMode ? 0.55 : 0.3;
+      });
+    }
   }, [isDarkMode]);
 
   useEffect(() => {
@@ -240,19 +288,39 @@ export default function TelephoneCanvas({
       1000
     );
     const BASE_REFERENCE_DISTANCE = 15.0; // 基準距離（對應 100% 縮放）
-    // 初始縮放幅度改為 77%（距離約 19.48）
+    // 初始縮放幅度改為 85%（距離約 17.65）
     const initialPosition = new THREE.Vector3(5, 10, 10).multiplyScalar(
-      1 / 0.77
+      1 / 0.85
     );
     camera.position.copy(initialPosition);
 
-    // 3. 建立渲染器
+    // 3. 建立渲染器與後處理管線 (EffectComposer + ShaderPass)
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(container.clientWidth, container.clientHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     container.appendChild(renderer.domElement);
+
+    const composer = new EffectComposer(renderer);
+    composer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    composer.setSize(container.clientWidth, container.clientHeight);
+
+    const renderPass = new RenderPass(scene, camera);
+    composer.addPass(renderPass);
+
+    const digitAtlasTexture = createDigitAtlasTexture();
+    const mosaicShader = createMosaicNumericShader(
+      digitAtlasTexture,
+      new THREE.Vector2(container.clientWidth, container.clientHeight)
+    );
+    mosaicShader.uniforms.uCellSize.value = mosaicCellSizeRef.current;
+    mosaicShader.uniforms.uThreshold.value = mosaicThresholdRef.current;
+    mosaicShader.uniforms.uSpeed.value = mosaicSpeedRef.current;
+
+    const mosaicPass = new ShaderPass(mosaicShader);
+    composer.addPass(mosaicPass);
+    mosaicPassRef.current = mosaicPass;
 
     // 4. 建立光源
     const ambientLight = new THREE.AmbientLight(
@@ -310,7 +378,9 @@ export default function TelephoneCanvas({
 
     const ledMaterial = new THREE.MeshStandardMaterial({
       color: LED_COLOR,
-      roughness: 0.5,
+      emissive: 0xffe196,
+      emissiveIntensity: 1.8,
+      roughness: 0.35,
       metalness: 0.05,
     });
 
@@ -330,6 +400,7 @@ export default function TelephoneCanvas({
     const segmentMeshes = [];
     const segmentMaterials = [];
     const bigSegmentEntries = [];
+    const ledHaloSprites = [];
     const segmentAnimations = new Map();
     let hoveredSegment = null;
 
@@ -407,15 +478,77 @@ export default function TelephoneCanvas({
       rimLight,
       segmentMaterials,
       smallSegmentEntries,
+      ledHaloSprites,
       syncBigSegmentsWithDigit,
     };
 
+    const pivotGroup = new THREE.Group();
+    scene.add(pivotGroup);
+
     let modelSamplePoints = [];
+    let displayExcludeCorners = [];
+    const smallDisplayCenter = new THREE.Vector3(0.35, 0.85, -1.2);
     const lastCameraMatrix = new THREE.Matrix4();
+    const lastPivotMatrix = new THREE.Matrix4();
     const projVec = new THREE.Vector3();
     let isModelFocused = false;
     let isFadingOutFrame = false;
+    let isMosaicSuppressedByFocus = false;
+    let mosaicDissolveState = null;
     let focusTimeout = null;
+    let lastModelBox = null;
+
+    // 邊角遮罩候選點（縮減範圍並集中於外圍邊角／線圈／底座邊緣，避開 3D 七段顯示器區域）
+    const EDGE_MASK_CANDIDATES = [
+      { nx: 0.20, ny: 0.22 },
+      { nx: 0.14, ny: 0.50 },
+      { nx: 0.22, ny: 0.82 },
+      { nx: 0.46, ny: 0.88 },
+      { nx: 0.78, ny: 0.76 },
+      { nx: 0.84, ny: 0.44 },
+      { nx: 0.44, ny: 0.14 },
+    ];
+
+    const pickRandomEdgeMaskSlots = () => {
+      const pool = EDGE_MASK_CANDIDATES.slice();
+      const chosen = [];
+      for (let i = 0; i < 3; i += 1) {
+        const idx = Math.floor(Math.random() * pool.length);
+        const base = pool.splice(idx, 1)[0];
+        chosen.push({
+          nx: base.nx + (Math.random() - 0.5) * 0.05,
+          ny: base.ny + (Math.random() - 0.5) * 0.05,
+          scale: 0.13 + Math.random() * 0.05,
+        });
+      }
+      return {
+        seed: 1 + Math.random() * 99,
+        slots: chosen,
+      };
+    };
+
+    let activeMaskConfig = pickRandomEdgeMaskSlots();
+
+    const syncMosaicMaskUniforms = (box) => {
+      if (!box || !mosaicPassRef.current) return;
+      const baseSpan = Math.max(80, Math.min(box.width, box.height));
+      mosaicPass.uniforms.uMaskSeed.value = activeMaskConfig.seed;
+      activeMaskConfig.slots.forEach((slot, idx) => {
+        mosaicPass.uniforms.uMaskCenters.value[idx].set(
+          box.x + slot.nx * box.width,
+          box.y + slot.ny * box.height
+        );
+        mosaicPass.uniforms.uMaskRadii.value[idx] = baseSpan * slot.scale;
+      });
+    };
+
+    // 每 5 秒隨機跳轉一次邊角馬賽克遮罩位置
+    const maskInterval = setInterval(() => {
+      activeMaskConfig = pickRandomEdgeMaskSlots();
+      if (lastModelBox) {
+        syncMosaicMaskUniforms(lastModelBox);
+      }
+    }, 5000);
 
     // 即時計算相機視角看向模型的外輪廓投影（包含 2D 投影包圍框與 Convex Hull 多邊形）
     const computeProjectionFrame = () => {
@@ -431,10 +564,15 @@ export default function TelephoneCanvas({
       }
 
       camera.updateMatrixWorld();
-      if (lastCameraMatrix.equals(camera.matrixWorldInverse)) {
+      pivotGroup.updateMatrixWorld();
+      if (
+        lastCameraMatrix.equals(camera.matrixWorldInverse) &&
+        lastPivotMatrix.equals(pivotGroup.matrixWorld)
+      ) {
         return;
       }
       lastCameraMatrix.copy(camera.matrixWorldInverse);
+      lastPivotMatrix.copy(pivotGroup.matrixWorld);
 
       const width = container.clientWidth;
       const height = container.clientHeight;
@@ -446,7 +584,10 @@ export default function TelephoneCanvas({
       const screenPoints = [];
 
       for (let i = 0; i < modelSamplePoints.length; i++) {
-        projVec.copy(modelSamplePoints[i]).project(camera);
+        projVec
+          .copy(modelSamplePoints[i])
+          .applyMatrix4(pivotGroup.matrixWorld)
+          .project(camera);
         if (projVec.z > 1) continue;
 
         const sx = ((projVec.x + 1) / 2) * width;
@@ -464,15 +605,96 @@ export default function TelephoneCanvas({
 
       const padding = 12;
       const box = {
-        x: Math.round(minX - padding),
-        y: Math.round(minY - padding),
-        width: Math.round(maxX - minX + padding * 2),
-        height: Math.round(maxY - minY + padding * 2),
+        x: minX - padding,
+        y: minY - padding,
+        width: maxX - minX + padding * 2,
+        height: maxY - minY + padding * 2,
       };
+      lastModelBox = box;
+      syncMosaicMaskUniforms(box);
+
+      // 投影 3D 七段顯示器保護區，確保馬賽克不會遮蓋大／小七段顯示器
+      if (displayExcludeCorners.length === 8 && mosaicPassRef.current) {
+        let dMinX = Infinity;
+        let dMaxX = -Infinity;
+        let dMinY = Infinity;
+        let dMaxY = -Infinity;
+        for (let i = 0; i < displayExcludeCorners.length; i += 1) {
+          projVec
+            .copy(displayExcludeCorners[i])
+            .applyMatrix4(pivotGroup.matrixWorld)
+            .project(camera);
+          const dx = ((projVec.x + 1) / 2) * width;
+          const dy = ((-projVec.y + 1) / 2) * height;
+          if (dx < dMinX) dMinX = dx;
+          if (dx > dMaxX) dMaxX = dx;
+          if (dy < dMinY) dMinY = dy;
+          if (dy > dMaxY) dMaxY = dy;
+        }
+        mosaicPass.uniforms.uDisplayExclude.value.set(
+          dMinX - 8,
+          dMinY - 8,
+          dMaxX + 8,
+          dMaxY + 8
+        );
+      }
 
       const hull = compute2DConvexHull(screenPoints);
 
-      onUpdateProjectionFrameRef.current({ box, hull });
+      // 1. 計算模型中央偏上方 3D 表面錨點與左上方 3D 懸浮錨點之浮點螢幕座標
+      // 加大視差位移幅度，並保留完整子像素浮點精度使轉動視角與阻尼滑行時明顯且平滑地移動
+      projVec
+        .set(-0.35, 0.35, 0.45)
+        .applyMatrix4(pivotGroup.matrixWorld)
+        .project(camera);
+      const anchorX = ((projVec.x + 1) / 2) * width;
+      const anchorY = ((-projVec.y + 1) / 2) * height;
+
+      projVec
+        .set(-1.35, 1.15, 0.85)
+        .applyMatrix4(pivotGroup.matrixWorld)
+        .project(camera);
+      const floatX = ((projVec.x + 1) / 2) * width;
+      const floatY = ((-projVec.y + 1) / 2) * height;
+
+      const centerX = width * 0.5;
+      const centerY = height * 0.5;
+
+      const pillX = Math.max(
+        14,
+        Math.min(centerX - 108, centerX - 155 + (floatX - centerX) * 1.45)
+      );
+      const pillY = Math.max(
+        170,
+        Math.min(box.y - 38, centerY - 210 + (floatY - centerY) * 1.65)
+      );
+
+      const clickAnchor = {
+        x: anchorX,
+        y: anchorY,
+        pillX,
+        pillY,
+      };
+
+      // 2. 計算模型上方（3D 小七段顯示器區域上緣）之投影座標，供主畫面上方 2D 七段對話框尖角動態指向
+      projVec
+        .copy(smallDisplayCenter)
+        .applyMatrix4(pivotGroup.matrixWorld)
+        .project(camera);
+      const rawTipX = ((projVec.x + 1) / 2) * width;
+      const rawTipY = ((-projVec.y + 1) / 2) * height;
+      const bubbleTip = {
+        x: rawTipX,
+        y: Math.max(178, Math.min(box.y - 6, rawTipY - 12)),
+        viewportWidth: width,
+      };
+
+      onUpdateProjectionFrameRef.current({
+        box,
+        hull,
+        clickAnchor,
+        bubbleTip,
+      });
     };
 
     const loader = new GLTFLoader();
@@ -562,13 +784,26 @@ export default function TelephoneCanvas({
         model.updateMatrixWorld(true);
 
         loadedModel = model;
-        scene.add(model);
+        pivotGroup.add(model);
 
-        // 採集整個模型所有子網格在世界坐標系下的包圍盒頂點，用於即時計算外輪廓投影
+        // 採集整個模型所有子網格在世界坐標系下的包圍盒頂點，用於即時計算外輪廓投影與 3D 七段保護區
         const samplePoints = [];
+        const smallDisplayBox = new THREE.Box3();
+        const displayExcludeBox = new THREE.Box3();
         model.traverse((child) => {
           if (child.isMesh && child.geometry) {
             child.updateMatrixWorld(true);
+            if (child.userData.smallInfo) {
+              smallDisplayBox.expandByObject(child);
+              displayExcludeBox.expandByObject(child);
+            } else if (child.userData.segmentInfo) {
+              displayExcludeBox.expandByObject(child);
+            } else if (
+              isLedMeshName(child.name) ||
+              isLedMeshName(child.parent?.name)
+            ) {
+              child.userData.isLed = true;
+            }
             if (!child.geometry.boundingBox) {
               child.geometry.computeBoundingBox();
             }
@@ -591,11 +826,47 @@ export default function TelephoneCanvas({
             }
           }
         });
+        if (!smallDisplayBox.isEmpty()) {
+          smallDisplayBox.getCenter(smallDisplayCenter);
+          smallDisplayCenter.y += 0.55;
+        }
+        if (!displayExcludeBox.isEmpty()) {
+          const db = displayExcludeBox;
+          displayExcludeCorners = [
+            new THREE.Vector3(db.min.x, db.min.y, db.min.z),
+            new THREE.Vector3(db.max.x, db.min.y, db.min.z),
+            new THREE.Vector3(db.min.x, db.max.y, db.min.z),
+            new THREE.Vector3(db.max.x, db.max.y, db.min.z),
+            new THREE.Vector3(db.min.x, db.min.y, db.max.z),
+            new THREE.Vector3(db.max.x, db.min.y, db.max.z),
+            new THREE.Vector3(db.min.x, db.max.y, db.max.z),
+            new THREE.Vector3(db.max.x, db.max.y, db.max.z),
+          ];
+        }
         modelSamplePoints = samplePoints;
         computeProjectionFrame();
 
-        // 為小七段顯示器各段建立光暈 Sprite 並套用初始樣式
+        // 為小七段顯示器各段與 LED1-4 建立光暈 Sprite（加入 pivotGroup 使其跟隨模型同步旋轉）
         model.traverse((child) => {
+          if (child.isMesh && child.userData.isLed) {
+            const ledBox = new THREE.Box3().setFromObject(child);
+            const ledCenter = ledBox.getCenter(new THREE.Vector3());
+            const ledHaloMat = new THREE.SpriteMaterial({
+              map: glowTexture,
+              color: 0xffe196,
+              blending: THREE.AdditiveBlending,
+              transparent: true,
+              opacity: isDarkModeRef.current ? 0.55 : 0.3,
+              depthWrite: false,
+              depthTest: false,
+            });
+            const ledHalo = new THREE.Sprite(ledHaloMat);
+            ledHalo.position.set(ledCenter.x, ledCenter.y + 0.03, ledCenter.z);
+            ledHalo.scale.set(0.55, 0.55, 1);
+            pivotGroup.add(ledHalo);
+            ledHaloSprites.push(ledHalo);
+            return;
+          }
           if (child.isMesh && child.userData.smallInfo) {
             const { digitIndex, segId } = child.userData.smallInfo;
             const segBox = new THREE.Box3().setFromObject(child);
@@ -618,7 +889,7 @@ export default function TelephoneCanvas({
             );
             haloSprite.scale.set(0.32, 0.32, 1);
             haloSprite.visible = false;
-            scene.add(haloSprite);
+            pivotGroup.add(haloSprite);
 
             const entry = {
               mesh: child,
@@ -649,7 +920,7 @@ export default function TelephoneCanvas({
 
           const pointLight = new THREE.PointLight(0xffe196, 0, 2.8, 1.5);
           pointLight.position.set(segCenter.x, segCenter.y + 0.28, segCenter.z);
-          scene.add(pointLight);
+          pivotGroup.add(pointLight);
 
           const haloMat = new THREE.SpriteMaterial({
             map: glowTexture,
@@ -664,7 +935,7 @@ export default function TelephoneCanvas({
           haloSprite.position.set(segCenter.x, segCenter.y + 0.14, segCenter.z);
           haloSprite.scale.set(2.2, 2.2, 1);
           haloSprite.visible = false;
-          scene.add(haloSprite);
+          pivotGroup.add(haloSprite);
 
           const entry = {
             mesh: segMesh,
@@ -714,15 +985,17 @@ export default function TelephoneCanvas({
       const currentDistance = camera.position.distanceTo(controls.target);
       const zoomPct = (BASE_REFERENCE_DISTANCE / currentDistance) * 100;
 
-      setCameraInfo({
-        azimuth: normalizeZero(azimuthDeg, 1),
-        polar: normalizeZero(polarDeg, 1),
-        rotX: normalizeZero(rotXDeg, 1),
-        rotY: normalizeZero(rotYDeg, 1),
-        rotZ: normalizeZero(rotZDeg, 1),
-        distance: currentDistance.toFixed(2),
-        zoomPercent: zoomPct.toFixed(0),
-      });
+      if (setCameraInfo) {
+        setCameraInfo({
+          azimuth: normalizeZero(azimuthDeg, 1),
+          polar: normalizeZero(polarDeg, 1),
+          rotX: normalizeZero(rotXDeg, 1),
+          rotY: normalizeZero(rotYDeg, 1),
+          rotZ: normalizeZero(rotZDeg, 1),
+          distance: currentDistance.toFixed(2),
+          zoomPercent: zoomPct.toFixed(0),
+        });
+      }
     };
 
     updateCameraStats();
@@ -833,19 +1106,47 @@ export default function TelephoneCanvas({
         });
         setDigitPointerPositions(pointerPositions);
       }
+
+      // 計算大七段顯示器中間段（id === 7, Plane.008）之螢幕座標，用於輸入提示往右上斜拉線
+      if (setBottomSegmentPos) {
+        const middleMesh = segmentMeshes.find(
+          (m) => m.userData.segmentInfo?.id === 7
+        );
+        if (middleMesh) {
+          const mBox = new THREE.Box3().setFromObject(middleMesh);
+          const mCenter = mBox.getCenter(new THREE.Vector3());
+          mCenter.project(camera);
+          setBottomSegmentPos({
+            x: Math.round(((mCenter.x + 1) / 2) * width),
+            y: Math.round(((-mCenter.y + 1) / 2) * height),
+            viewportWidth: width,
+          });
+        }
+      }
     };
 
     // 點擊模型運鏡至聚焦視角，並鎖定相機移動（直到點擊 Back 按鈕才恢復）
     const focusOnModel = () => {
       if (isModelFocused || isFadingOutFrame || tweenState) return;
 
+      // 先啟動馬賽克細分化／碎化退場動態 (420ms)，同時淡出外輪廓投影框，完成後再關閉濾鏡並開運鏡
+      isMosaicSuppressedByFocus = false;
+      mosaicDissolveState = {
+        startTime: performance.now(),
+        duration: 420,
+        from: 0.0,
+        to: 1.0,
+      };
       isFadingOutFrame = true;
       if (setIsFrameFadingOut) setIsFrameFadingOut(true);
 
-      // 先讓投影框 fadeout 消失、關閉後才開運鏡，保持運鏡時完全流暢無延遲
       clearTimeout(focusTimeout);
       focusTimeout = setTimeout(() => {
         if (!container) return;
+        isMosaicSuppressedByFocus = true;
+        mosaicDissolveState = null;
+        mosaicPass.uniforms.uDissolve.value = 1.0;
+
         isModelFocused = true;
         setIsFocused(true);
         if (setIsCameraSettled) setIsCameraSettled(false);
@@ -878,12 +1179,14 @@ export default function TelephoneCanvas({
             isFadingOutFrame = false;
           }
         );
-      }, 260);
+      }, 430);
     };
 
-    // 點擊 Back 按鈕：滑順運鏡恢復至初始角度與縮放比，並重新開啟相機轉動功能
+    // 點擊 Back 按鈕：滑順運鏡恢復至初始角度與縮放比，到達定點後再由細碎方塊淡入放大恢復初始馬賽克狀態
     const resetCameraView = () => {
       clearTimeout(focusTimeout);
+      mosaicDissolveState = null;
+      isMosaicSuppressedByFocus = true;
       isModelFocused = false;
       setIsFocused(false);
       if (setIsCameraSettled) setIsCameraSettled(false);
@@ -900,16 +1203,28 @@ export default function TelephoneCanvas({
           controls.update();
           updateCameraStats();
 
-          // 運鏡回到初始位置後，重新計算外輪廓並讓投影框淡入顯現
+          // 運鏡回到初始位置後，重新計算外輪廓並啟動馬賽克 fade-in (uDissolve: 1.0 -> 0.0)
           if (setIsFrameFadingOut) setIsFrameFadingOut(false);
           lastCameraMatrix.elements[0] += 0.0001;
           computeProjectionFrame();
+          mosaicPass.uniforms.uDissolve.value = 1.0;
+          isMosaicSuppressedByFocus = false;
+          mosaicDissolveState = {
+            startTime: performance.now(),
+            duration: 520,
+            from: 1.0,
+            to: 0.0,
+          };
         }
       );
     };
 
     if (resetViewRef) {
       resetViewRef.current = resetCameraView;
+    }
+
+    if (focusViewRef) {
+      focusViewRef.current = focusOnModel;
     }
 
     // 8. 射線檢測：大七段顯示器按鈕點擊、小七段與大七段聯動發光與模型點擊聚焦
@@ -950,6 +1265,15 @@ export default function TelephoneCanvas({
           nextActive,
           hoveredSegment === segMesh
         );
+      }
+
+      if (onSegmentMatrixChangeRef.current) {
+        const nextMatrix = Array.from({ length: SMALL_DIGIT_COUNT }, (_, dIdx) =>
+          STANDARD_ABCDEFG_SMALL_SEG_IDS.map((segId) =>
+            smallSegmentStateRef.current[dIdx]?.[segId] ? 1 : 0
+          )
+        );
+        onSegmentMatrixChangeRef.current(nextMatrix, nextActive);
       }
     };
 
@@ -1042,9 +1366,14 @@ export default function TelephoneCanvas({
     // 9. 視窗縮放自適應
     const handleResize = () => {
       if (!container) return;
-      camera.aspect = container.clientWidth / container.clientHeight;
+      const width = container.clientWidth;
+      const height = container.clientHeight;
+      camera.aspect = width / height;
       camera.updateProjectionMatrix();
-      renderer.setSize(container.clientWidth, container.clientHeight);
+      renderer.setSize(width, height);
+      composer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      composer.setSize(width, height);
+      mosaicPass.uniforms.uResolution.value.set(width, height);
       if (isModelFocused && !tweenState) {
         updateScreenOverlayPositions();
       }
@@ -1107,6 +1436,22 @@ export default function TelephoneCanvas({
         controls.update();
       }
 
+      // 主畫面時模型微微帶阻尼旋轉（X/Y/Z 幅度皆不超過 15 度，速度約 5/10）；點擊聚焦時平滑歸零
+      if (!isModelFocused && !isFadingOutFrame && !tweenState) {
+        const t = performance.now() * 0.001;
+        const targetRx = Math.sin(t * 0.75) * THREE.MathUtils.degToRad(6);
+        const targetRy = Math.sin(t * 0.53) * THREE.MathUtils.degToRad(11);
+        const targetRz = Math.cos(t * 0.63) * THREE.MathUtils.degToRad(4);
+
+        pivotGroup.rotation.x += (targetRx - pivotGroup.rotation.x) * 0.065;
+        pivotGroup.rotation.y += (targetRy - pivotGroup.rotation.y) * 0.065;
+        pivotGroup.rotation.z += (targetRz - pivotGroup.rotation.z) * 0.065;
+      } else {
+        pivotGroup.rotation.x += (0 - pivotGroup.rotation.x) * 0.18;
+        pivotGroup.rotation.y += (0 - pivotGroup.rotation.y) * 0.18;
+        pivotGroup.rotation.z += (0 - pivotGroup.rotation.z) * 0.18;
+      }
+
       // 即時計算並更新相機視角看向模型的外輪廓投影框
       if (modelSamplePoints.length > 0) {
         computeProjectionFrame();
@@ -1134,7 +1479,31 @@ export default function TelephoneCanvas({
         });
       }
 
-      renderer.render(scene, camera);
+      if (mosaicDissolveState) {
+        const elapsed = performance.now() - mosaicDissolveState.startTime;
+        const p = Math.min(elapsed / mosaicDissolveState.duration, 1);
+        const eased = p * (2 - p);
+        mosaicPass.uniforms.uDissolve.value = THREE.MathUtils.lerp(
+          mosaicDissolveState.from,
+          mosaicDissolveState.to,
+          eased
+        );
+        if (p >= 1) {
+          mosaicPass.uniforms.uDissolve.value = mosaicDissolveState.to;
+          mosaicDissolveState = null;
+        }
+      }
+
+      mosaicPass.uniforms.uTime.value = performance.now() * 0.001;
+      if (
+        mosaicEnabledRef.current &&
+        isDarkModeRef.current &&
+        !isMosaicSuppressedByFocus
+      ) {
+        composer.render();
+      } else {
+        renderer.render(scene, camera);
+      }
     };
     animate();
 
@@ -1146,21 +1515,29 @@ export default function TelephoneCanvas({
       domElement.removeEventListener("pointerup", handlePointerUp);
       controls.removeEventListener("change", updateCameraStats);
       clearTimeout(focusTimeout);
+      clearInterval(maskInterval);
       cancelAnimationFrame(animationFrameId);
       controls.dispose();
       clayMaterial.dispose();
       backplateMaterial.dispose();
+      ledMaterial.dispose();
+      ringMaterial.dispose();
+      baseMaterial.dispose();
       glowTexture.dispose();
       segmentMaterials.forEach((mat) => mat.dispose());
+      ledHaloSprites.forEach((sprite) => {
+        pivotGroup.remove(sprite);
+        sprite.material.dispose();
+      });
       bigSegmentEntries.forEach(({ pointLight, haloSprite }) => {
-        scene.remove(pointLight);
-        scene.remove(haloSprite);
+        pivotGroup.remove(pointLight);
+        pivotGroup.remove(haloSprite);
         haloSprite.material.dispose();
       });
       smallSegmentEntries.forEach(({ material, haloSprite }) => {
         material.dispose();
         if (haloSprite) {
-          scene.remove(haloSprite);
+          pivotGroup.remove(haloSprite);
           haloSprite.material.dispose();
         }
       });
@@ -1171,6 +1548,10 @@ export default function TelephoneCanvas({
           }
         });
       }
+      mosaicPassRef.current = null;
+      mosaicPass.dispose();
+      digitAtlasTexture.dispose();
+      composer.dispose();
       renderer.dispose();
       if (container.contains(renderer.domElement)) {
         container.removeChild(renderer.domElement);
@@ -1178,9 +1559,11 @@ export default function TelephoneCanvas({
       sceneObjectsRef.current = null;
     };
   }, [
+    focusViewRef,
     mainLightRef,
     resetViewRef,
     setArrowPositions,
+    setBottomSegmentPos,
     setCameraInfo,
     setDigitPointerPositions,
     setIsCameraSettled,

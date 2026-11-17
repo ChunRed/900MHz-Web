@@ -10,7 +10,7 @@ export const BIG_DISPLAY_BACKPLATE_COLOR = 0x555555;
 
 // LED1-4 模型名稱與顏色
 export const LED_NAMES = ["LED1", "LED2", "LED3", "LED4"];
-export const LED_COLOR = 0x666666;
+export const LED_COLOR = 0xffe196;
 
 // ring 模型名稱與顏色
 export const RING_NAME = "ring";
@@ -45,6 +45,16 @@ export const BIG_SEGMENT_ACTIVE_STYLE = {
 };
 
 export const SMALL_DIGIT_COUNT = 8;
+
+// 標準七段顯示器 a, b, c, d, e, f, g 順序對應的小七段編號 (seg-sm1 ~ seg-sm7)
+// a(上)=1, b(右上)=7, c(右下)=6, d(下)=3, e(左下)=4, f(左上)=5, g(中)=2
+export const STANDARD_ABCDEFG_SMALL_SEG_IDS = [1, 7, 6, 3, 4, 5, 2];
+
+// 2D 小七段顯示器圖示顏色設定（0=熄滅 0x666666，1=點亮 #ffe196）
+export const SEGMENT_2D_COLORS = {
+  off: "#666666",
+  on: "#ffe196",
+};
 
 // 大七段顯示器顏色設定（預設為 0x777777）
 export const SEGMENT_COLORS = {

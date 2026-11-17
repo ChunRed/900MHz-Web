@@ -9,7 +9,7 @@ export default function ThemeToggleButton({ isDarkMode, onToggle }) {
         className={`flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border shadow-sm backdrop-blur-sm transition-all active:scale-95 ${
           isDarkMode
             ? "border-zinc-700/80 bg-zinc-900/85 text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
-            : "border-zinc-200 bg-white/90 text-zinc-700 hover:bg-zinc-100 hover:text-zinc-900"
+            : "border-zinc-800 bg-zinc-900 text-white hover:bg-black"
         }`}
       >
         {isDarkMode ? (
