@@ -4,13 +4,16 @@ export default function ModelProjectionFrame({
   isFadingOut = false,
   isDarkMode = true,
   mode = "both", // "box" | "hull" | "both"
+  hudOpacity = 1,
+  hullOpacity = 1,
+  labelText = "PROJ // 900.0",
 }) {
   if (!frameData || !frameData.box) return null;
 
   const { box, hull } = frameData;
   if (box.width <= 0 || box.height <= 0) return null;
 
-  const isActuallyVisible = visible && !isFadingOut;
+  const isActuallyVisible = visible && !isFadingOut && hudOpacity > 0.01;
 
   // 日夜間模式高對比科技配色（確保日間白底與夜間黑底皆具備清晰明暗層次）
   const primaryColor = isDarkMode ? "#dddddd" : "#18181b";
@@ -39,47 +42,55 @@ export default function ModelProjectionFrame({
 
   return (
     <svg
-      className={`pointer-events-none fixed inset-0 z-15 h-full w-full overflow-visible transition-opacity duration-250 ease-out ${
-        isActuallyVisible ? "opacity-100" : "opacity-0"
+      style={
+        hudOpacity < 1
+          ? { opacity: visible && !isFadingOut ? hudOpacity : 0 }
+          : undefined
+      }
+      className={`pointer-events-none fixed inset-0 z-15 h-full w-full overflow-visible ${
+        hudOpacity < 1 ? "" : "transition-opacity duration-250 ease-out"
+      } ${
+        hudOpacity < 1
+          ? ""
+          : isActuallyVisible
+          ? "opacity-100"
+          : "opacity-0"
       }`}
       shapeRendering="geometricPrecision"
       aria-hidden="true"
     >
-      {/* 1. 外輪廓多邊形投影（虛線輪廓 + 轉角追蹤方框節點，參考圖三） */}
-      {(mode === "hull" || mode === "both") && hullPointsStr && (
-        <g>
-          <polygon
-            points={hullPointsStr}
-            fill="none"
-            stroke={secondaryColor}
-            strokeWidth="1"
-            strokeDasharray="4 3"
-            strokeOpacity="0.85"
-          />
-          {hull.map((pt, idx) => (
-            <g key={idx}>
-              <rect
-                x={pt.x - 2.5}
-                y={pt.y - 2.5}
-                width="5"
-                height="5"
-                fill="none"
-                stroke={primaryColor}
-                strokeWidth="0.9"
-                strokeOpacity="0.85"
-              />
-              <circle
-                cx={pt.x}
-                cy={pt.y}
-                r="1"
-                fill={primaryColor}
-              />
-            </g>
-          ))}
-        </g>
-      )}
+      {/* 1. 外輪廓多邊形投影（虛線輪廓 + 轉角追蹤方框節點，進入 Datasheet 時隨模型淡出） */}
+      {(mode === "hull" || mode === "both") &&
+        hullPointsStr &&
+        hullOpacity > 0.01 && (
+          <g style={{ opacity: hullOpacity }}>
+            <polygon
+              points={hullPointsStr}
+              fill="none"
+              stroke={secondaryColor}
+              strokeWidth="1"
+              strokeDasharray="4 3"
+              strokeOpacity="0.85"
+            />
+            {hull.map((pt, idx) => (
+              <g key={idx}>
+                <rect
+                  x={pt.x - 2.5}
+                  y={pt.y - 2.5}
+                  width="5"
+                  height="5"
+                  fill="none"
+                  stroke={primaryColor}
+                  strokeWidth="0.9"
+                  strokeOpacity="0.85"
+                />
+                <circle cx={pt.x} cy={pt.y} r="1" fill={primaryColor} />
+              </g>
+            ))}
+          </g>
+        )}
 
-      {/* 2. 外輪廓投影矩形框（底層細線、中段刻度、轉角粗線與端點節點、CAD 數據標記） */}
+      {/* 2. 外輪廓投影矩形框（在 Datasheet 模式下直接轉變為資訊內容的外框） */}
       {(mode === "box" || mode === "both") && (
         <g>
           {/* 底層細線外框 */}
@@ -159,7 +170,7 @@ export default function ModelProjectionFrame({
             fontFamily="monospace"
             letterSpacing="0.12em"
           >
-            PROJ // 900.0
+            {labelText}
           </text>
           <text
             x={box.x + box.width - 4}

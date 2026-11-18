@@ -3,14 +3,17 @@ export default function ClickModelHint({
   visible = true,
   isFadingOut = false,
   isDarkMode = true,
+  hudOpacity = 1,
+  disabled = false,
   onClickModel,
 }) {
   if (!frameData || !frameData.clickAnchor) return null;
 
   const { clickAnchor } = frameData;
-  const isActuallyVisible = visible && !isFadingOut;
+  const isActuallyVisible =
+    visible && !isFadingOut && hudOpacity > 0.01 && !disabled;
 
-  const pillWidth = 136;
+  const pillWidth = 148;
   const pillHeight = 30;
 
   const pillLeft = clickAnchor.pillX ?? Math.max(20, clickAnchor.x - 155);
@@ -27,8 +30,19 @@ export default function ClickModelHint({
 
   return (
     <div
-      className={`pointer-events-none fixed inset-0 z-15 transition-opacity duration-250 ease-out ${
-        isActuallyVisible ? "opacity-100" : "opacity-0"
+      style={
+        hudOpacity < 1
+          ? { opacity: visible && !isFadingOut ? hudOpacity : 0 }
+          : undefined
+      }
+      className={`pointer-events-none fixed inset-0 z-15 ${
+        hudOpacity < 1 ? "" : "transition-opacity duration-250 ease-out"
+      } ${
+        hudOpacity < 1
+          ? ""
+          : isActuallyVisible
+          ? "opacity-100"
+          : "opacity-0"
       }`}
       aria-hidden={!isActuallyVisible}
     >
@@ -123,20 +137,33 @@ export default function ClickModelHint({
               : "pointer-events-none"
           }`}
         >
-          {/* 左側編號分格（反相明暗面） */}
+          {/* 左側編號分格（反相明暗面 + 播報器圖示） */}
           <span
-            className={`flex items-center justify-center border-r px-2 font-mono text-[10px] font-bold tracking-tighter ${
+            className={`flex items-center justify-center gap-1 border-r px-2 font-mono text-[10px] font-bold tracking-tighter ${
               isDarkMode
                 ? "border-zinc-400 bg-zinc-900 text-[#dddddd]"
                 : "border-zinc-700 bg-[#dddddd] text-zinc-900"
             }`}
           >
-            ▲01
+            <span>▲01</span>
+            <svg
+              width="11"
+              height="11"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+            </svg>
           </span>
 
           {/* 右側主文字分格 */}
           <span className="flex flex-1 items-center justify-center whitespace-nowrap px-2.5 font-mono text-xs font-semibold tracking-wider">
-            Click 點擊
+            點擊播報器
           </span>
         </button>
       </div>

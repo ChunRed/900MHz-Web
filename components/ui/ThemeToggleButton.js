@@ -1,9 +1,20 @@
-export default function ThemeToggleButton({ isDarkMode, onToggle }) {
+export default function ThemeToggleButton({
+  isDarkMode,
+  onToggle,
+  hudOpacity = 1,
+  disabled = false,
+}) {
+  const isHidden = hudOpacity <= 0.01;
   return (
-    <div className="fixed top-4 left-4 z-20">
+    <div
+      style={{ opacity: hudOpacity }}
+      className={`fixed top-4 left-4 z-20 ${isHidden ? "pointer-events-none" : ""}`}
+      aria-hidden={isHidden}
+    >
       <button
         type="button"
         onClick={onToggle}
+        disabled={disabled || isHidden}
         aria-label={isDarkMode ? "切換至日間模式" : "切換至夜間模式"}
         title={isDarkMode ? "切換至日間模式" : "切換至夜間模式"}
         className={`flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border shadow-sm backdrop-blur-sm transition-all active:scale-95 ${

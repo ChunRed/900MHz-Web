@@ -137,6 +137,7 @@ export default function TelephoneCanvas({
   mosaicCellSize = MOSAIC_DEFAULTS.cellSize,
   mosaicThreshold = MOSAIC_DEFAULTS.threshold,
   mosaicSpeed = MOSAIC_DEFAULTS.speed,
+  datasheetProgress = 0,
   setIsFocused,
   setIsCameraSettled,
   setIsFrameFadingOut,
@@ -159,6 +160,7 @@ export default function TelephoneCanvas({
   const mosaicCellSizeRef = useRef(mosaicCellSize);
   const mosaicThresholdRef = useRef(mosaicThreshold);
   const mosaicSpeedRef = useRef(mosaicSpeed);
+  const datasheetProgressRef = useRef(datasheetProgress);
   const mosaicPassRef = useRef(null);
   const onUpdateProjectionFrameRef = useRef(onUpdateProjectionFrame);
   const onSegmentMatrixChangeRef = useRef(onSegmentMatrixChange);
@@ -170,6 +172,10 @@ export default function TelephoneCanvas({
   useEffect(() => {
     mosaicEnabledRef.current = mosaicEnabled;
   }, [mosaicEnabled]);
+
+  useEffect(() => {
+    datasheetProgressRef.current = datasheetProgress;
+  }, [datasheetProgress]);
 
   useEffect(() => {
     mosaicCellSizeRef.current = mosaicCellSize;
@@ -400,6 +406,8 @@ export default function TelephoneCanvas({
     const segmentMeshes = [];
     const segmentMaterials = [];
     const bigSegmentEntries = [];
+    const floatingSegments = [];
+    let floatingSegGeometry = null;
     const ledHaloSprites = [];
     const segmentAnimations = new Map();
     let hoveredSegment = null;
@@ -948,6 +956,62 @@ export default function TelephoneCanvas({
         });
 
         syncBigSegmentsWithDigit(activeDigitIndexRef.current);
+
+        // 複製 25 個主模型七段顯示器單段（長六邊形體），散佈於外圍空間並呈無重力隨機旋轉飄動
+        if (bigSegmentEntries.length > 0) {
+          floatingSegGeometry = bigSegmentEntries[0].mesh.geometry.clone();
+          floatingSegGeometry.center();
+
+          const count = 25;
+          for (let i = 0; i < count; i += 1) {
+            const shade = 0x44 + Math.floor(Math.random() * 0x67);
+            const segColor = (shade << 16) | (shade << 8) | shade;
+            const segMat = new THREE.MeshStandardMaterial({
+              color: segColor,
+              roughness: 0.75,
+              metalness: 0.15,
+            });
+            const mesh = new THREE.Mesh(floatingSegGeometry, segMat);
+            const angle = (i / count) * Math.PI * 2 + (Math.random() - 0.5) * 0.5;
+            const radius = 4.6 + Math.random() * 4.4;
+            const basePos = new THREE.Vector3(
+              Math.cos(angle) * radius,
+              (Math.random() - 0.5) * 6.5,
+              Math.sin(angle) * radius - 1.5
+            );
+            mesh.position.copy(basePos);
+            const scale = 0.28 + Math.random() * 0.22;
+            mesh.scale.setScalar(scale);
+            mesh.rotation.set(
+              Math.random() * Math.PI * 2,
+              Math.random() * Math.PI * 2,
+              Math.random() * Math.PI * 2
+            );
+            scene.add(mesh);
+
+            floatingSegments.push({
+              mesh,
+              material: segMat,
+              basePos,
+              rotVel: new THREE.Vector3(
+                (Math.random() - 0.5) * 0.006,
+                (Math.random() - 0.5) * 0.006,
+                (Math.random() - 0.5) * 0.006
+              ),
+              driftAmp: new THREE.Vector3(
+                0.18 + Math.random() * 0.25,
+                0.22 + Math.random() * 0.3,
+                0.18 + Math.random() * 0.25
+              ),
+              driftFreq: new THREE.Vector3(
+                0.25 + Math.random() * 0.25,
+                0.2 + Math.random() * 0.25,
+                0.25 + Math.random() * 0.25
+              ),
+              phase: Math.random() * Math.PI * 2,
+            });
+          }
+        }
       },
       undefined,
       (error) => {
@@ -1282,7 +1346,9 @@ export default function TelephoneCanvas({
     };
 
     const handlePointerMove = (e) => {
-      if (!loadedModel || tweenState) return;
+      if (!loadedModel || tweenState || datasheetProgressRef.current > 0.01) {
+        return;
+      }
       const rect = renderer.domElement.getBoundingClientRect();
       pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
       pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
@@ -1326,7 +1392,9 @@ export default function TelephoneCanvas({
     };
 
     const handlePointerUp = (e) => {
-      if (!loadedModel || tweenState) return;
+      if (!loadedModel || tweenState || datasheetProgressRef.current > 0.01) {
+        return;
+      }
 
       const moveDist = Math.hypot(
         e.clientX - pointerDownPos.x,
@@ -1384,8 +1452,40 @@ export default function TelephoneCanvas({
 
     // 10. 動畫迴圈
     let animationFrameId;
+    const smoothStep = (edge0, edge1, x) => {
+      const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
+      return t * t * (3 - 2 * t);
+    };
+
     const animate = () => {
       animationFrameId = requestAnimationFrame(animate);
+
+      const dp = datasheetProgressRef.current;
+      // Datasheet 完全進入純黑閱讀模式後暫停 3D 與後處理渲染以節省背景效能
+      if (dp >= 0.86) {
+        return;
+      }
+
+      if (dp > 0.005) {
+        controls.enabled = false;
+      } else if (!tweenState && !isModelFocused) {
+        controls.enabled = true;
+      }
+
+      if (floatingSegments.length > 0) {
+        const t = performance.now() * 0.001;
+        for (let i = 0; i < floatingSegments.length; i += 1) {
+          const item = floatingSegments[i];
+          item.mesh.rotation.x += item.rotVel.x;
+          item.mesh.rotation.y += item.rotVel.y;
+          item.mesh.rotation.z += item.rotVel.z;
+          item.mesh.position.set(
+            item.basePos.x + Math.sin(t * item.driftFreq.x + item.phase) * item.driftAmp.x,
+            item.basePos.y + Math.cos(t * item.driftFreq.y + item.phase * 1.3) * item.driftAmp.y,
+            item.basePos.z + Math.sin(t * item.driftFreq.z + item.phase * 0.7) * item.driftAmp.z
+          );
+        }
+      }
 
       if (tweenState) {
         const now = performance.now();
@@ -1494,12 +1594,70 @@ export default function TelephoneCanvas({
         }
       }
 
+      // 同步驅動 Datasheet 轉場（階段 4-1 擴大遮罩、4-2 降低細分粗粒化、4-3 場景熄燈與自發光歸零）
+      const coverage = smoothStep(0.0, 0.45, dp);
+      const coarsen = smoothStep(0.15, 0.65, dp);
+      const lightFactor = 1.0 - smoothStep(0.4, 0.78, dp);
+
+      mosaicPass.uniforms.uDatasheetCoverage.value = coverage;
+      mosaicPass.uniforms.uDatasheetCoarsen.value = coarsen;
+      mosaicPass.uniforms.uSceneBrightness.value = lightFactor;
+
+      const dark = isDarkModeRef.current;
+      ambientLight.intensity = (dark ? 0.15 : 0.2) * lightFactor;
+      hemisphereLight.intensity = (dark ? 0.55 : 1.0) * lightFactor;
+      mainLight.intensity = (dark ? 1.45 : 2.0) * lightFactor;
+      fillLight.intensity = (dark ? 0.55 : 1.0) * lightFactor;
+      rimLight.intensity = (dark ? 0.5 : 0.8) * lightFactor;
+      ledMaterial.emissiveIntensity = 1.8 * lightFactor;
+      ledHaloSprites.forEach((sprite) => {
+        sprite.material.opacity = (dark ? 0.55 : 0.3) * lightFactor;
+      });
+      smallSegmentEntries.forEach((entry) => {
+        const isLit = Boolean(
+          smallSegmentStateRef.current[entry.digitIndex]?.[entry.segId]
+        );
+        if (isLit) {
+          const glow = smallGlowRef.current;
+          entry.material.emissiveIntensity =
+            (glow <= 0 ? 0.35 : 0.45 + 1.85 * glow) * lightFactor;
+          if (entry.haloSprite) {
+            const baseOp = dark
+              ? SMALL_SEGMENT_ACTIVE_STYLE.haloOpacityDark
+              : SMALL_SEGMENT_ACTIVE_STYLE.haloOpacityLight;
+            entry.haloSprite.material.opacity = baseOp * glow * lightFactor;
+          }
+        }
+      });
+      bigSegmentEntries.forEach((entry) => {
+        if (isBigSegmentLit(entry.mesh, activeDigitIndexRef.current)) {
+          const bigGlow = bigGlowRef.current;
+          const baseLight = dark
+            ? BIG_SEGMENT_ACTIVE_STYLE.pointLightIntensityDark
+            : BIG_SEGMENT_ACTIVE_STYLE.pointLightIntensityLight;
+          const baseHalo = dark
+            ? BIG_SEGMENT_ACTIVE_STYLE.haloOpacityDark
+            : BIG_SEGMENT_ACTIVE_STYLE.haloOpacityLight;
+          entry.material.emissiveIntensity =
+            (bigGlow <= 0 ? 0.45 : 0.65 + 1.85 * bigGlow) * lightFactor;
+          entry.pointLight.intensity = baseLight * bigGlow * lightFactor;
+          entry.haloSprite.material.opacity = baseHalo * bigGlow * lightFactor;
+        }
+      });
+      if (!dark) {
+        const bgVal = lightFactor;
+        scene.background.setRGB(bgVal, bgVal, bgVal);
+      } else {
+        scene.background.setHex(0x000000);
+      }
+
       mosaicPass.uniforms.uTime.value = performance.now() * 0.001;
-      if (
-        mosaicEnabledRef.current &&
-        isDarkModeRef.current &&
-        !isMosaicSuppressedByFocus
-      ) {
+      const useMosaicPass =
+        (mosaicEnabledRef.current &&
+          isDarkModeRef.current &&
+          !isMosaicSuppressedByFocus) ||
+        dp > 0.005;
+      if (useMosaicPass) {
         composer.render();
       } else {
         renderer.render(scene, camera);
@@ -1541,6 +1699,11 @@ export default function TelephoneCanvas({
           haloSprite.material.dispose();
         }
       });
+      floatingSegments.forEach(({ mesh, material }) => {
+        scene.remove(mesh);
+        material.dispose();
+      });
+      if (floatingSegGeometry) floatingSegGeometry.dispose();
       if (loadedModel) {
         loadedModel.traverse((child) => {
           if (child.isMesh && child.geometry) {

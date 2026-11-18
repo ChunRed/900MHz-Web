@@ -1,15 +1,29 @@
-export default function AuthorInfoButton({ isDarkMode }) {
+export default function AuthorInfoButton({
+  isDarkMode,
+  onClick,
+  disabled = false,
+  hudOpacity = 1,
+}) {
+  const isHidden = hudOpacity <= 0.01;
+
   return (
-    <div className="fixed right-4 bottom-32 z-20">
+    <div
+      style={{ opacity: hudOpacity }}
+      className={`fixed right-4 bottom-32 z-20 ${
+        isHidden ? "pointer-events-none" : ""
+      }`}
+      aria-hidden={isHidden}
+    >
       <button
         type="button"
-        onClick={() => {}}
-        aria-label="作者資訊"
-        title="作者資訊"
-        className={`flex h-9 w-9 cursor-pointer items-center justify-center border shadow-md backdrop-blur-sm transition-all duration-200 hover:scale-105 active:scale-95 ${
-          isDarkMode
-            ? "border-[#dddddd] bg-zinc-950/90 text-[#dddddd] hover:bg-zinc-900"
-            : "border-zinc-900 bg-zinc-900 text-white hover:bg-black"
+        onClick={onClick}
+        disabled={disabled || isHidden}
+        aria-label="資訊 | information"
+        title="資訊 | information"
+        className={`flex h-9 w-9 items-center justify-center border border-black bg-white text-black shadow-md transition-all duration-200 ${
+          disabled || isHidden
+            ? "cursor-default"
+            : "cursor-pointer hover:scale-105 hover:bg-zinc-100 active:scale-95"
         }`}
       >
         <svg

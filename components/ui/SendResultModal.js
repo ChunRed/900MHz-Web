@@ -56,7 +56,7 @@ export default function SendResultModal({
 
             <div className="mt-4 flex flex-col items-center justify-center border border-dashed border-zinc-700 bg-black/80 px-4 py-6 text-center">
               <p className="font-mono text-sm font-semibold tracking-wider text-[#ffe196]">
-                請輸入內容再按送出
+                請輸入內容再按傳送
               </p>
               <p className="mt-1.5 font-mono text-[10px] uppercase tracking-widest text-zinc-400">
                 PLEASE INPUT DATA BEFORE SENDING
@@ -84,17 +84,17 @@ export default function SendResultModal({
             </div>
 
             {/* 八個 2D 小七段顯示器圖示，一字排開（0=0x666666 熄滅，1=#ffe196 點亮） */}
-            <div className="mt-4 flex flex-col items-center border border-dashed border-zinc-700 bg-black/90 px-3 py-4">
+            <div className="mt-4 flex flex-col items-center border border-dashed border-zinc-700 bg-black/90 px-3 py-6">
               <SevenSegmentRow2D
                 segmentMatrix={segmentMatrix}
-                digitClassName="h-11 w-6 sm:h-12 sm:w-7"
+                digitClassName="h-16 w-8 sm:h-20 sm:w-10"
                 gapClassName="gap-2 sm:gap-2.5"
               />
             </div>
 
             {/* 陣列數字顯示在八個 2D 小七段顯示器圖示下方 */}
-            <div className="mt-3 border border-zinc-800 bg-black/75 p-3.5 font-mono text-xs leading-relaxed break-all text-[#ffe196] select-all">
-              <div className="mb-1 flex items-center justify-between border-b border-zinc-900 pb-1 text-[9.5px] text-zinc-500">
+            <div className="mt-2.5 border border-zinc-800/80 bg-black/60 p-2.5 font-mono text-[10px] leading-relaxed break-all text-zinc-400 select-all">
+              <div className="mb-1 flex items-center justify-between border-b border-zinc-900 pb-1 text-[9px] text-zinc-600">
                 <span>ARRAY // [A,B,C,D,E,F,G]</span>
                 <span>8×7 BIT</span>
               </div>

@@ -120,14 +120,13 @@ export default function SegmentInputHint({
       >
         {/* 左側編號反相面 */}
         <div
-          className={`flex flex-col items-center justify-center border-r px-2 font-mono text-[9px] font-bold leading-tight ${
+          className={`flex items-center justify-center border-r px-2.5 font-mono text-[10px] font-bold tracking-tighter ${
             isDarkMode
               ? "border-zinc-400 bg-zinc-900 text-[#dddddd]"
               : "border-zinc-700 bg-[#dddddd] text-zinc-900"
           }`}
         >
-          <span>INP</span>
-          <span>G07</span>
+          ▲02
         </div>
 
         {/* 右側雙語訊息面 */}

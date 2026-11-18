@@ -64,6 +64,9 @@ export function createMosaicNumericShader(digitTexture, resolution) {
       uTime: { value: 0.0 },
       uMaskSeed: { value: 1.0 },
       uDissolve: { value: 0.0 },
+      uDatasheetCoverage: { value: 0.0 },
+      uDatasheetCoarsen: { value: 0.0 },
+      uSceneBrightness: { value: 1.0 },
       uDisplayExclude: { value: new THREE.Vector4(-1, -1, -1, -1) },
       uMaskCenters: {
         value: [
@@ -91,6 +94,9 @@ export function createMosaicNumericShader(digitTexture, resolution) {
       uniform float uTime;
       uniform float uMaskSeed;
       uniform float uDissolve;
+      uniform float uDatasheetCoverage;
+      uniform float uDatasheetCoarsen;
+      uniform float uSceneBrightness;
       uniform vec4 uDisplayExclude;
       uniform vec2 uMaskCenters[3];
       uniform float uMaskRadii[3];
@@ -133,15 +139,23 @@ export function createMosaicNumericShader(digitTexture, resolution) {
         vec3 origSrgb = pow(max(origTexel.rgb, vec3(0.0)), vec3(1.0 / 2.2));
         float origLum = clamp(dot(origSrgb, vec3(0.299, 0.587, 0.114)), 0.0, 1.0);
 
+        if (uSceneBrightness <= 0.002) {
+          gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+          return;
+        }
+
         if (uDissolve >= 0.999) {
-          gl_FragColor = vec4(origSrgb, 1.0);
+          gl_FragColor = vec4(origSrgb * uSceneBrightness, 1.0);
           return;
         }
 
         vec2 pixelPos = vUv * uResolution;
 
-        // 精細四叉樹多尺度網格分割 (細化格子尺寸；uDissolve 增加時逐步強制細分化碎裂)
-        float size0 = max(10.0, uCellSize * 1.75);
+        // 精細四叉樹多尺度網格分割
+        // - uDissolve 增加時逐步強制細分化碎裂
+        // - uDatasheetCoarsen 增加時擴大基礎格子並降低細分深度（合併成粗大像素方格）
+        float coarseScale = mix(1.0, 2.75, uDatasheetCoarsen);
+        float size0 = max(10.0, uCellSize * 1.75 * coarseScale);
         float size1 = size0 * 0.5;
         float size2 = size0 * 0.25;
         float size3 = size0 * 0.125;
@@ -154,26 +168,41 @@ export function createMosaicNumericShader(digitTexture, resolution) {
         float lMax = 0.0;
         float lCenter = 0.0;
 
-        // uDissolve 越高越容易觸發強制向下細分 (細分化動態)
         float dissolveSplitBoost = uDissolve * 0.85;
+        float coarsenPenalty = uDatasheetCoarsen * 1.45;
 
         // Level 0
         vec2 idx0 = floor(pixelPos / size0);
         evalCellStats(idx0 * size0, size0, lMin, lMax, lCenter);
         bool straddlesEdge0 = (lMax >= 0.05 && lMin < 0.05);
-        bool split0 = straddlesEdge0 || (lMax - lMin > 0.11) || ((hash21(idx0 + uMaskSeed * 1.13) + dissolveSplitBoost) > 0.28);
+        bool allowDetailSplit0 = uDatasheetCoarsen < 0.72;
+        bool split0 = allowDetailSplit0 && (
+          straddlesEdge0 ||
+          (lMax - lMin > 0.11 + coarsenPenalty * 0.4) ||
+          ((hash21(idx0 + uMaskSeed * 1.13) + dissolveSplitBoost - coarsenPenalty) > 0.28)
+        );
 
         if (split0) {
           vec2 idx1 = floor(pixelPos / size1);
           evalCellStats(idx1 * size1, size1, lMin, lMax, lCenter);
           bool straddlesEdge1 = (lMax >= 0.05 && lMin < 0.05);
-          bool split1 = straddlesEdge1 || (lMax - lMin > 0.16) || ((hash21(idx1 + uMaskSeed * 1.71) + dissolveSplitBoost) > 0.42);
+          bool allowDetailSplit1 = uDatasheetCoarsen < 0.48;
+          bool split1 = allowDetailSplit1 && (
+            straddlesEdge1 ||
+            (lMax - lMin > 0.16 + coarsenPenalty * 0.45) ||
+            ((hash21(idx1 + uMaskSeed * 1.71) + dissolveSplitBoost - coarsenPenalty) > 0.42)
+          );
 
           if (split1) {
             vec2 idx2 = floor(pixelPos / size2);
             evalCellStats(idx2 * size2, size2, lMin, lMax, lCenter);
             bool straddlesEdge2 = (lMax >= 0.05 && lMin < 0.05);
-            bool split2 = straddlesEdge2 || (lMax - lMin > 0.24) || ((hash21(idx2 + uMaskSeed * 2.37) + dissolveSplitBoost * 1.15) > 0.62);
+            bool allowDetailSplit2 = uDatasheetCoarsen < 0.25;
+            bool split2 = allowDetailSplit2 && (
+              straddlesEdge2 ||
+              (lMax - lMin > 0.24 + coarsenPenalty * 0.5) ||
+              ((hash21(idx2 + uMaskSeed * 2.37) + dissolveSplitBoost * 1.15 - coarsenPenalty) > 0.62)
+            );
 
             if (split2) {
               vec2 idx3 = floor(pixelPos / size3);
@@ -193,11 +222,12 @@ export function createMosaicNumericShader(digitTexture, resolution) {
           }
         }
 
-        // 以目前方塊中心轉回 Top-Down 螢幕像素座標判定遮罩 (確保網格切齊且避開 3D 七段顯示器)
+        // 以目前方塊中心轉回 Top-Down 螢幕像素座標判定遮罩 (Datasheet 轉場時逐步擴張至 100% 全螢幕覆蓋)
         vec2 cellCenterPx = (chosenIndex + 0.5) * chosenSize;
         vec2 cellScreenPos = vec2(cellCenterPx.x, uResolution.y - cellCenterPx.y);
 
         bool inDisplaySafeZone =
+          (uDatasheetCoverage < 0.08) &&
           uDisplayExclude.z > uDisplayExclude.x &&
           cellScreenPos.x >= uDisplayExclude.x &&
           cellScreenPos.x <= uDisplayExclude.z &&
@@ -205,21 +235,28 @@ export function createMosaicNumericShader(digitTexture, resolution) {
           cellScreenPos.y <= uDisplayExclude.w;
 
         if (inDisplaySafeZone) {
-          gl_FragColor = vec4(origSrgb, 1.0);
+          gl_FragColor = vec4(origSrgb * uSceneBrightness, 1.0);
           return;
         }
 
-        float d0 = length(cellScreenPos - uMaskCenters[0]) / max(uMaskRadii[0], 1.0);
-        float d1 = length(cellScreenPos - uMaskCenters[1]) / max(uMaskRadii[1], 1.0);
-        float d2 = length(cellScreenPos - uMaskCenters[2]) / max(uMaskRadii[2], 1.0);
+        float maxDiag = length(uResolution);
+        float r0 = mix(max(uMaskRadii[0], 1.0), maxDiag * 1.15, uDatasheetCoverage);
+        float r1 = mix(max(uMaskRadii[1], 1.0), maxDiag * 1.15, uDatasheetCoverage);
+        float r2 = mix(max(uMaskRadii[2], 1.0), maxDiag * 1.15, uDatasheetCoverage);
+
+        float d0 = length(cellScreenPos - uMaskCenters[0]) / r0;
+        float d1 = length(cellScreenPos - uMaskCenters[1]) / r1;
+        float d2 = length(cellScreenPos - uMaskCenters[2]) / r2;
         float minDist = min(d0, min(d1, d2));
 
         vec2 maskCell = floor(cellScreenPos / max(size2, 4.0));
-        float maskJitter = (hash21(maskCell + uMaskSeed * 3.17) - 0.5) * 0.36;
-        bool inEdgeMask = (minDist + maskJitter) < 1.0;
+        float maskJitter = (hash21(maskCell + uMaskSeed * 3.17) - 0.5) * 0.36 * (1.0 - uDatasheetCoverage);
+        float screenEdgeDist = min(min(vUv.x, 1.0 - vUv.x), min(vUv.y, 1.0 - vUv.y));
+        bool inScreenBorder = screenEdgeDist < (0.14 + maskJitter * 0.08);
+        bool inEdgeMask = (uDatasheetCoverage >= 0.98) || ((minDist + maskJitter) < 1.0) || inScreenBorder;
 
         if (!inEdgeMask) {
-          gl_FragColor = vec4(origSrgb, 1.0);
+          gl_FragColor = vec4(origSrgb * uSceneBrightness, 1.0);
           return;
         }
 
@@ -252,7 +289,7 @@ export function createMosaicNumericShader(digitTexture, resolution) {
         vec2 cellLocalUv = fract(pixelPos / chosenSize);
         vec2 distToEdgePx = min(cellLocalUv, 1.0 - cellLocalUv) * chosenSize;
         if (distToEdgePx.x < 0.55 || distToEdgePx.y < 0.55) {
-          float borderShade = (luminance < 0.28) ? 0.22 : 0.02;
+          float borderShade = ((luminance < 0.28) ? 0.22 : 0.02) * uSceneBrightness;
           gl_FragColor = vec4(vec3(borderShade), 1.0);
           return;
         }
@@ -292,16 +329,16 @@ export function createMosaicNumericShader(digitTexture, resolution) {
               1.0
             );
             float bgShade = mix(0.88, 1.0, brightNorm);
-            gl_FragColor = vec4(vec3(bgShade) * glyphMask, 1.0);
+            gl_FragColor = vec4(vec3(bgShade) * glyphMask * uSceneBrightness, 1.0);
           } else {
             float strokeFactor = 1.0 - glyphMask;
             vec3 cellColor = mix(vec3(luminance * 0.85), vec3(0.92), strokeFactor);
-            gl_FragColor = vec4(cellColor, 1.0);
+            gl_FragColor = vec4(cellColor * uSceneBrightness, 1.0);
           }
           return;
         }
 
-        gl_FragColor = vec4(vec3(luminance), 1.0);
+        gl_FragColor = vec4(vec3(luminance) * uSceneBrightness, 1.0);
       }
     `,
   };

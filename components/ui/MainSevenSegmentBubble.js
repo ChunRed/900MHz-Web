@@ -6,10 +6,11 @@ export default function MainSevenSegmentBubble({
   visible = true,
   isFadingOut = false,
   isDarkMode = true,
+  hudOpacity = 1,
 }) {
   if (!frameData || !frameData.bubbleTip) return null;
 
-  const isActuallyVisible = visible && !isFadingOut;
+  const isActuallyVisible = visible && !isFadingOut && hudOpacity > 0.01;
   const { bubbleTip } = frameData;
 
   const viewportWidth = bubbleTip.viewportWidth || 390;
@@ -66,8 +67,19 @@ export default function MainSevenSegmentBubble({
 
   return (
     <div
-      className={`pointer-events-none fixed inset-0 z-15 transition-opacity duration-250 ease-out ${
-        isActuallyVisible ? "opacity-100" : "opacity-0"
+      style={
+        hudOpacity < 1
+          ? { opacity: visible && !isFadingOut ? hudOpacity : 0 }
+          : undefined
+      }
+      className={`pointer-events-none fixed inset-0 z-15 ${
+        hudOpacity < 1 ? "" : "transition-opacity duration-250 ease-out"
+      } ${
+        hudOpacity < 1
+          ? ""
+          : isActuallyVisible
+          ? "opacity-100"
+          : "opacity-0"
       }`}
       aria-hidden={!isActuallyVisible}
     >
@@ -124,16 +136,16 @@ export default function MainSevenSegmentBubble({
         />
         <circle cx={tipX} cy={tipY} r="2" fill={strokeColor} />
 
-        {/* 框線上方微縮遙測標記 */}
+        {/* 框線上方微縮遙測標記與「傳送訊息內容」標題 */}
         <text
           x={boxLeft + 4}
           y={boxTop - 5}
           fill={secondaryStroke}
           fontSize="8.5"
           fontFamily="monospace"
-          letterSpacing="0.12em"
+          letterSpacing="0.1em"
         >
-          SEG // 01-08
+          SEG // 01-08 · 傳送訊息內容
         </text>
         <text
           x={boxRight - 4}
