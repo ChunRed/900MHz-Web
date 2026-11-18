@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import SevenSegmentRow2D from "@/components/ui/SevenSegmentRow2D";
 
 export default function SendResultModal({
@@ -6,6 +7,17 @@ export default function SendResultModal({
   isDarkMode,
   onClose,
 }) {
+  useEffect(() => {
+    if (!visible) return undefined;
+    const handleKeyDown = (e) => {
+      if (e.key === "Escape") {
+        onClose?.();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [visible, onClose]);
+
   if (!visible) return null;
 
   const isEmpty = segmentMatrix.every((digit) =>
@@ -15,14 +27,38 @@ export default function SendResultModal({
 
   return (
     <div
-      className="fixed inset-0 z-40 flex items-center justify-center bg-black/65 px-4 backdrop-blur-sm transition-opacity duration-200"
+      style={{
+        backdropFilter: "blur(8px)",
+        WebkitBackdropFilter: "blur(8px)",
+      }}
+      className="fixed inset-0 z-40 flex items-center justify-center bg-black/65 px-4 animate-[modalFadeIn_240ms_ease-out]"
       role="dialog"
       aria-modal="true"
       aria-labelledby="send-result-title"
       onClick={onClose}
     >
+      <style jsx>{`
+        @keyframes modalFadeIn {
+          from {
+            opacity: 0;
+          }
+          to {
+            opacity: 1;
+          }
+        }
+        @keyframes modalCardIn {
+          from {
+            opacity: 0;
+            transform: scale(0.95);
+          }
+          to {
+            opacity: 1;
+            transform: scale(1);
+          }
+        }
+      `}</style>
       <div
-        className={`relative w-full max-w-md border p-6 shadow-2xl transition-colors ${
+        className={`relative w-full max-w-md border p-6 shadow-2xl transition-colors animate-[modalCardIn_260ms_cubic-bezier(0.22,1,0.36,1)] ${
           isDarkMode
             ? "border-zinc-700 bg-zinc-950/95 text-zinc-100"
             : "border-zinc-900 bg-zinc-950 text-zinc-100"

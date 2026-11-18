@@ -31,12 +31,15 @@ const smoothStep = (edge0, edge1, x) => {
 };
 
 const DATASHEET_TRANSITION_MS = 1350;
+const SEND_ENTER_MS = 2850;
+const SEND_EXIT_MS = 1150;
 
 export default function Home() {
   const resetViewRef = useRef(null);
   const focusViewRef = useRef(null);
   const mainLightRef = useRef(null);
   const datasheetRafRef = useRef(null);
+  const sendRafRef = useRef(null);
 
   // 初始畫面預設為夜間模式，並顯示初始操作說明視窗
   const [isDarkMode, setIsDarkMode] = useState(true);
@@ -65,8 +68,15 @@ export default function Home() {
     useState(false);
   const [datasheetDirection, setDatasheetDirection] = useState("idle"); // "idle" | "enter" | "exit"
 
+  // Send 統一發送與反向還原時間軸進度 (0 = 主畫面, 1 = 傳送序列完成／顯示彈窗)
+  const [sendProgress, setSendProgress] = useState(0);
+  const [isTransitioningSend, setIsTransitioningSend] = useState(false);
+  const [sendDirection, setSendDirection] = useState("idle"); // "idle" | "enter" | "exit"
+
   const runDatasheetTransition = (target) => {
-    if (isTransitioningDatasheet) return;
+    if (isTransitioningDatasheet || isTransitioningSend || sendProgress > 0.01) {
+      return;
+    }
     if (target === 1 && datasheetProgress >= 1) return;
     if (target === 0 && datasheetProgress <= 0) return;
 
@@ -98,10 +108,77 @@ export default function Home() {
     datasheetRafRef.current = requestAnimationFrame(step);
   };
 
+  const runSendTransition = (target) => {
+    if (isTransitioningSend || isTransitioningDatasheet || datasheetProgress > 0.01) {
+      return;
+    }
+    if (target === 1 && sendProgress >= 1) return;
+    if (target === 0 && sendProgress <= 0) return;
+
+    const from = sendProgress;
+    const duration = target === 1 ? SEND_ENTER_MS : SEND_EXIT_MS;
+    const startTime = performance.now();
+    setSendDirection(target === 1 ? "enter" : "exit");
+    setIsTransitioningSend(true);
+
+    if (sendRafRef.current) {
+      cancelAnimationFrame(sendRafRef.current);
+    }
+
+    const step = (now) => {
+      const elapsed = now - startTime;
+      const rawT = Math.min(1, elapsed / duration);
+      const nextProgress = from + (target - from) * rawT;
+      setSendProgress(nextProgress);
+
+      if (rawT < 1) {
+        sendRafRef.current = requestAnimationFrame(step);
+      } else {
+        setSendProgress(target);
+        setIsTransitioningSend(false);
+        setSendDirection("idle");
+        sendRafRef.current = null;
+      }
+    };
+
+    sendRafRef.current = requestAnimationFrame(step);
+  };
+
+  const handleClickSend = () => {
+    if (
+      isTransitioningSend ||
+      isTransitioningDatasheet ||
+      datasheetProgress > 0.01 ||
+      sendProgress > 0.01 ||
+      isSendModalOpen
+    ) {
+      return;
+    }
+    const isEmpty = segmentMatrix.every((digit) =>
+      digit.every((seg) => seg === 0)
+    );
+    if (isEmpty) {
+      setIsSendModalOpen(true);
+      return;
+    }
+    runSendTransition(1);
+  };
+
+  const handleCloseSendModal = () => {
+    if (isTransitioningSend) return;
+    setIsSendModalOpen(false);
+    if (sendProgress > 0.01) {
+      runSendTransition(0);
+    }
+  };
+
   useEffect(() => {
     return () => {
       if (datasheetRafRef.current) {
         cancelAnimationFrame(datasheetRafRef.current);
+      }
+      if (sendRafRef.current) {
+        cancelAnimationFrame(sendRafRef.current);
       }
     };
   }, []);
@@ -144,6 +221,27 @@ export default function Home() {
       : datasheetProgress >= 0.72;
   const isDatasheetActive = datasheetProgress > 0.01;
   const canvasOpacity = 1 - smoothStep(0.78, 0.86, datasheetProgress);
+
+  // 由 Send 時間軸 (2.85s 正向 / 1.15s 反向) 衍生的 UI 退場、七段顯示器居中、加速閃爍與直接展開為通知卡參數
+  const isSendActive = sendProgress > 0.01;
+  const sendSec = sendProgress * 2.85;
+  const sendHudOpacity = 1 - smoothStep(0.5, 1.4, sendSec);
+  const sendMoveT =
+    sendDirection === "exit"
+      ? smoothStep(0.25, 1.8, sendSec)
+      : smoothStep(0.5, 1.5, sendSec);
+  const sendPointerOpacity = 1 - smoothStep(0.5, 0.9, sendSec);
+  const sendExpandT =
+    sendDirection === "exit"
+      ? smoothStep(2.05, 2.85, sendSec)
+      : smoothStep(2.5, 2.85, sendSec);
+  const canCloseSend = !isTransitioningSend && sendProgress >= 0.99;
+  let sendBlinkOpacity = 1;
+  if (sendDirection === "enter" && sendSec >= 1.5 && sendSec < 2.5) {
+    const u = Math.min(1, Math.max(0, (sendSec - 1.5) / 1.0));
+    const phase = 2 * Math.PI * (2 * u + 8 * u * u);
+    sendBlinkOpacity = Math.cos(phase) >= 0 ? 1 : 0.14;
+  }
 
   const morphT = smoothStep(0.15, 0.78, datasheetProgress);
   const morphedFrameData = (() => {
@@ -206,7 +304,7 @@ export default function Home() {
           className="w-full h-full"
           style={{
             opacity: canvasOpacity,
-            pointerEvents: isDatasheetActive ? "none" : "auto",
+            pointerEvents: isDatasheetActive || isSendActive ? "none" : "auto",
           }}
         >
           <TelephoneCanvas
@@ -220,6 +318,8 @@ export default function Home() {
           mosaicThreshold={MOSAIC_DEFAULTS.threshold}
           mosaicSpeed={MOSAIC_DEFAULTS.speed}
           datasheetProgress={datasheetProgress}
+          sendProgress={sendProgress}
+          sendDirection={sendDirection}
           setIsFocused={setIsFocused}
           setIsCameraSettled={setIsCameraSettled}
           setIsFrameFadingOut={setIsFrameFadingOut}
@@ -240,22 +340,32 @@ export default function Home() {
           visible={!isFocused}
           isFadingOut={isFrameFadingOut}
           isDarkMode={isDarkMode}
-          hudOpacity={1}
-          hullOpacity={hudOpacity}
+          hudOpacity={sendHudOpacity}
+          hullOpacity={Math.min(hudOpacity, sendHudOpacity)}
           labelText={datasheetProgress >= 0.5 ? "DOC // 900.0" : "PROJ // 900.0"}
           mode="both"
         />
 
-        {/* 主畫面「Click 點擊」提示標示（左斜上拉出細線＋標籤，點擊模型時與投影框同步 fadeout） */}
+        {/* 主畫面「點擊播報器」提示標示（左斜上拉出細線＋標籤，點擊模型時與投影框同步 fadeout） */}
         <ClickModelHint
           frameData={projectionFrameData}
           visible={!isFocused}
           isFadingOut={isFrameFadingOut}
           isDarkMode={isDarkMode}
-          hudOpacity={hudOpacity}
-          disabled={isTransitioningDatasheet || isDatasheetActive}
+          hudOpacity={Math.min(hudOpacity, sendHudOpacity)}
+          disabled={
+            isTransitioningDatasheet ||
+            isDatasheetActive ||
+            isTransitioningSend ||
+            isSendActive
+          }
           onClickModel={() => {
-            if (!isTransitioningDatasheet && !isDatasheetActive) {
+            if (
+              !isTransitioningDatasheet &&
+              !isDatasheetActive &&
+              !isTransitioningSend &&
+              !isSendActive
+            ) {
               focusViewRef.current?.();
             }
           }}
@@ -264,22 +374,32 @@ export default function Home() {
         {/* 畫面左上角日 / 夜間模式切換按鈕 */}
         <ThemeToggleButton
           isDarkMode={isDarkMode}
-          hudOpacity={1}
-          disabled={isTransitioningDatasheet}
+          hudOpacity={sendHudOpacity}
+          disabled={isTransitioningDatasheet || isTransitioningSend || isSendActive}
           onToggle={() => setIsDarkMode((prev) => !prev)}
         />
 
         {/* 畫面上方作品標題 */}
-        <HeaderTitle isDarkMode={isDarkMode} hudOpacity={1} />
+        <HeaderTitle isDarkMode={isDarkMode} hudOpacity={sendHudOpacity} />
 
-        {/* 主畫面上方八個 2D 小七段顯示器對話框（細框線指向模型上方，尖角隨視角轉動即時調整） */}
+        {/* 主畫面上方八個 2D 小七段顯示器對話框（傳送階段二移至螢幕正中央，階段三執行由慢而快閃爍，閃爍後直接展開為傳送通知卡） */}
         <MainSevenSegmentBubble
           segmentMatrix={segmentMatrix}
           frameData={morphedFrameData}
           visible={!isFocused}
           isFadingOut={isFrameFadingOut}
-          isDarkMode={isDarkMode}
+          isDarkMode={isDarkMode || sendProgress > 0.2}
           hudOpacity={1}
+          sendMoveT={sendMoveT}
+          sendPointerOpacity={sendPointerOpacity}
+          sendBlinkOpacity={sendBlinkOpacity}
+          sendExpandT={sendExpandT}
+          canCloseSend={canCloseSend}
+          onCloseSend={() => {
+            if (!isTransitioningSend && sendProgress > 0.01) {
+              runSendTransition(0);
+            }
+          }}
         />
 
         {/* 指向目前所選小七段顯示器的上下飄動箭頭 */}
@@ -311,8 +431,13 @@ export default function Home() {
         {!isFocused && (
           <AuthorInfoButton
             isDarkMode={isDarkMode}
-            hudOpacity={hudOpacity}
-            disabled={isTransitioningDatasheet || isDatasheetActive}
+            hudOpacity={Math.min(hudOpacity, sendHudOpacity)}
+            disabled={
+              isTransitioningDatasheet ||
+              isDatasheetActive ||
+              isTransitioningSend ||
+              isSendActive
+            }
             onClick={() => runDatasheetTransition(1)}
           />
         )}
@@ -330,16 +455,20 @@ export default function Home() {
           isFocused={isFocused}
           isDatasheetButtonBack={isDatasheetButtonBack}
           isDatasheetView={datasheetProgress >= 0.4}
-          isTransitioning={isTransitioningDatasheet}
+          isTransitioning={
+            isTransitioningDatasheet || isTransitioningSend || isSendActive
+          }
+          hudOpacity={sendHudOpacity}
           isDarkMode={isDarkMode}
           onBack={() => {
+            if (isTransitioningSend || isSendActive) return;
             if (isDatasheetActive) {
               runDatasheetTransition(0);
             } else {
               resetViewRef.current?.();
             }
           }}
-          onSend={() => setIsSendModalOpen(true)}
+          onSend={handleClickSend}
         />
 
         {/* 傳送內容通知彈窗（未輸入時提示請輸入內容，已輸入時顯示 8x7 小七段亮起狀態與陣列） */}
@@ -347,7 +476,7 @@ export default function Home() {
           visible={isSendModalOpen}
           segmentMatrix={segmentMatrix}
           isDarkMode={isDarkMode}
-          onClose={() => setIsSendModalOpen(false)}
+          onClose={handleCloseSendModal}
         />
 
         {/* 初始操作說明畫面（確認後上下壓縮收合退場） */}
@@ -358,7 +487,10 @@ export default function Home() {
         />
 
         {/* 畫面最下方署名小灰字 */}
-        <FooterText isDarkMode={isDarkMode || datasheetProgress >= 0.4} />
+        <FooterText
+          isDarkMode={isDarkMode || datasheetProgress >= 0.4}
+          hudOpacity={sendHudOpacity}
+        />
       </main>
     </>
   );

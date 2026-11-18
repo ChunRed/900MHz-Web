@@ -138,6 +138,8 @@ export default function TelephoneCanvas({
   mosaicThreshold = MOSAIC_DEFAULTS.threshold,
   mosaicSpeed = MOSAIC_DEFAULTS.speed,
   datasheetProgress = 0,
+  sendProgress = 0,
+  sendDirection = "idle",
   setIsFocused,
   setIsCameraSettled,
   setIsFrameFadingOut,
@@ -161,6 +163,8 @@ export default function TelephoneCanvas({
   const mosaicThresholdRef = useRef(mosaicThreshold);
   const mosaicSpeedRef = useRef(mosaicSpeed);
   const datasheetProgressRef = useRef(datasheetProgress);
+  const sendProgressRef = useRef(sendProgress);
+  const sendDirectionRef = useRef(sendDirection);
   const mosaicPassRef = useRef(null);
   const onUpdateProjectionFrameRef = useRef(onUpdateProjectionFrame);
   const onSegmentMatrixChangeRef = useRef(onSegmentMatrixChange);
@@ -176,6 +180,14 @@ export default function TelephoneCanvas({
   useEffect(() => {
     datasheetProgressRef.current = datasheetProgress;
   }, [datasheetProgress]);
+
+  useEffect(() => {
+    sendProgressRef.current = sendProgress;
+  }, [sendProgress]);
+
+  useEffect(() => {
+    sendDirectionRef.current = sendDirection;
+  }, [sendDirection]);
 
   useEffect(() => {
     mosaicCellSizeRef.current = mosaicCellSize;
@@ -1346,7 +1358,12 @@ export default function TelephoneCanvas({
     };
 
     const handlePointerMove = (e) => {
-      if (!loadedModel || tweenState || datasheetProgressRef.current > 0.01) {
+      if (
+        !loadedModel ||
+        tweenState ||
+        datasheetProgressRef.current > 0.01 ||
+        sendProgressRef.current > 0.01
+      ) {
         return;
       }
       const rect = renderer.domElement.getBoundingClientRect();
@@ -1392,7 +1409,12 @@ export default function TelephoneCanvas({
     };
 
     const handlePointerUp = (e) => {
-      if (!loadedModel || tweenState || datasheetProgressRef.current > 0.01) {
+      if (
+        !loadedModel ||
+        tweenState ||
+        datasheetProgressRef.current > 0.01 ||
+        sendProgressRef.current > 0.01
+      ) {
         return;
       }
 
@@ -1461,12 +1483,14 @@ export default function TelephoneCanvas({
       animationFrameId = requestAnimationFrame(animate);
 
       const dp = datasheetProgressRef.current;
+      const sp = sendProgressRef.current;
+      const sDir = sendDirectionRef.current;
       // Datasheet 完全進入純黑閱讀模式後暫停 3D 與後處理渲染以節省背景效能
       if (dp >= 0.86) {
         return;
       }
 
-      if (dp > 0.005) {
+      if (dp > 0.005 || sp > 0.005) {
         controls.enabled = false;
       } else if (!tweenState && !isModelFocused) {
         controls.enabled = true;
@@ -1536,8 +1560,8 @@ export default function TelephoneCanvas({
         controls.update();
       }
 
-      // 主畫面時模型微微帶阻尼旋轉（X/Y/Z 幅度皆不超過 15 度，速度約 5/10）；點擊聚焦時平滑歸零
-      if (!isModelFocused && !isFadingOutFrame && !tweenState) {
+      // 主畫面時模型微微帶阻尼旋轉（X/Y/Z 幅度皆不超過 15 度，速度約 5/10）；點擊聚焦或傳送動畫時平滑歸零
+      if (!isModelFocused && !isFadingOutFrame && !tweenState && sp <= 0.005) {
         const t = performance.now() * 0.001;
         const targetRx = Math.sin(t * 0.75) * THREE.MathUtils.degToRad(6);
         const targetRy = Math.sin(t * 0.53) * THREE.MathUtils.degToRad(11);
@@ -1550,6 +1574,16 @@ export default function TelephoneCanvas({
         pivotGroup.rotation.x += (0 - pivotGroup.rotation.x) * 0.18;
         pivotGroup.rotation.y += (0 - pivotGroup.rotation.y) * 0.18;
         pivotGroup.rotation.z += (0 - pivotGroup.rotation.z) * 0.18;
+      }
+
+      // Send 階段一（0.0s ~ 2.0s，對應 sp: 0 -> 0.70）：3D 模型沿 X 軸進行快速微幅機械振動，結束後回歸原位
+      if (sDir === "enter" && sp > 0 && sp < 0.7) {
+        const vibT = sp / 0.7;
+        const vibEnvelope = Math.sin(vibT * Math.PI);
+        pivotGroup.position.x =
+          Math.sin(performance.now() * 0.21) * 0.085 * vibEnvelope;
+      } else {
+        pivotGroup.position.x = 0;
       }
 
       // 即時計算並更新相機視角看向模型的外輪廓投影框
@@ -1594,14 +1628,23 @@ export default function TelephoneCanvas({
         }
       }
 
-      // 同步驅動 Datasheet 轉場（階段 4-1 擴大遮罩、4-2 降低細分粗粒化、4-3 場景熄燈與自發光歸零）
-      const coverage = smoothStep(0.0, 0.45, dp);
-      const coarsen = smoothStep(0.15, 0.65, dp);
-      const lightFactor = 1.0 - smoothStep(0.4, 0.78, dp);
+      // 同步驅動 Datasheet / Send 轉場（四叉樹擴大遮罩、降低細分粗粒化、場景亮度與自發光調整）
+      const dsCoverage = smoothStep(0.0, 0.45, dp);
+      const dsCoarsen = smoothStep(0.15, 0.65, dp);
+      const dsLightFactor = 1.0 - smoothStep(0.4, 0.78, dp);
+
+      const sendCoverage = smoothStep(0.0, 0.56, sp);
+      const sendCoarsen = smoothStep(0.07, 0.7, sp);
+      const sendDim = smoothStep(0.0, 0.7, sp);
+      const sendLightFactor = 1.0 - 0.5 * sendDim;
+
+      const coverage = Math.max(dsCoverage, sendCoverage);
+      const coarsen = Math.max(dsCoarsen, sendCoarsen);
+      const lightFactor = Math.min(dsLightFactor, sendLightFactor);
 
       mosaicPass.uniforms.uDatasheetCoverage.value = coverage;
       mosaicPass.uniforms.uDatasheetCoarsen.value = coarsen;
-      mosaicPass.uniforms.uSceneBrightness.value = lightFactor;
+      mosaicPass.uniforms.uSceneBrightness.value = dsLightFactor;
 
       const dark = isDarkModeRef.current;
       ambientLight.intensity = (dark ? 0.15 : 0.2) * lightFactor;
@@ -1645,7 +1688,11 @@ export default function TelephoneCanvas({
         }
       });
       if (!dark) {
-        const bgVal = lightFactor;
+        const bgFade = Math.max(
+          smoothStep(0.4, 0.78, dp),
+          smoothStep(0.0, 0.35, sp)
+        );
+        const bgVal = 1.0 - bgFade;
         scene.background.setRGB(bgVal, bgVal, bgVal);
       } else {
         scene.background.setHex(0x000000);
@@ -1656,7 +1703,8 @@ export default function TelephoneCanvas({
         (mosaicEnabledRef.current &&
           isDarkModeRef.current &&
           !isMosaicSuppressedByFocus) ||
-        dp > 0.005;
+        dp > 0.005 ||
+        sp > 0.005;
       if (useMosaicPass) {
         composer.render();
       } else {

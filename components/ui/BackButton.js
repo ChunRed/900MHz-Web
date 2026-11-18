@@ -3,13 +3,15 @@ export default function BackButton({
   isDatasheetButtonBack = false,
   isDatasheetView = false,
   isTransitioning = false,
+  hudOpacity = 1,
   isDarkMode,
   onBack,
   onSend,
 }) {
   const showBack = isFocused || isDatasheetButtonBack;
+  const isHidden = hudOpacity <= 0.01;
   const handleClick = () => {
-    if (isTransitioning) return;
+    if (isTransitioning || isHidden) return;
     if (showBack) {
       onBack?.();
     } else {
@@ -20,11 +22,17 @@ export default function BackButton({
   const useLightButton = isDarkMode || isDatasheetView;
 
   return (
-    <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-30">
+    <div
+      style={{ opacity: hudOpacity }}
+      className={`fixed bottom-10 left-1/2 -translate-x-1/2 z-30 ${
+        isHidden ? "pointer-events-none" : ""
+      }`}
+      aria-hidden={isHidden}
+    >
       <button
         type="button"
         onClick={handleClick}
-        disabled={isTransitioning}
+        disabled={isTransitioning || isHidden}
         aria-label={showBack ? "返回主畫面 (Back)" : "傳送七段顯示器內容 (Send)"}
         className={`group flex items-stretch overflow-hidden border shadow-md backdrop-blur-sm transition-all duration-200 ${
           isTransitioning
