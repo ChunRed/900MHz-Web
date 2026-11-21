@@ -4,6 +4,8 @@ import SevenSegmentRow2D from "@/components/ui/SevenSegmentRow2D";
 export default function SendResultModal({
   visible,
   segmentMatrix,
+  noticeType = "empty",
+  cooldownSec = 0,
   isDarkMode,
   onClose,
 }) {
@@ -23,6 +25,30 @@ export default function SendResultModal({
   const isEmpty = segmentMatrix.every((digit) =>
     digit.every((seg) => seg === 0)
   );
+  const showWarning =
+    noticeType === "duplicate" || noticeType === "cooldown" || isEmpty;
+
+  const warningMeta =
+    noticeType === "duplicate"
+      ? {
+          badge: "DUP // 00",
+          tag: "DUPLICATE",
+          message: "請勿短時間內重複傳送相同內容",
+          sub: "PLEASE MODIFY INPUT BEFORE RESENDING",
+        }
+      : noticeType === "cooldown"
+      ? {
+          badge: `WAIT // ${String(cooldownSec).padStart(2, "0")}s`,
+          tag: "COOLDOWN",
+          message: `傳送冷卻中，請於 ${cooldownSec} 秒後再試`,
+          sub: "TRANSMISSION COOLDOWN IN PROGRESS",
+        }
+      : {
+          badge: "ERR // 00",
+          tag: "EMPTY-BUF",
+          message: "請輸入內容再按傳送",
+          sub: "PLEASE INPUT DATA BEFORE SENDING",
+        };
 
   return (
     <div
@@ -70,12 +96,12 @@ export default function SendResultModal({
         <span className="pointer-events-none absolute -bottom-0.5 -left-0.5 h-3 w-3 border-b-2 border-l-2 border-[#dddddd]" />
         <span className="pointer-events-none absolute -bottom-0.5 -right-0.5 h-3 w-3 border-b-2 border-r-2 border-[#dddddd]" />
 
-        {isEmpty ? (
+        {showWarning ? (
           <>
             <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
               <div className="flex items-center gap-2">
                 <span className="border border-[#ffe196] bg-[#ffe196] px-1.5 py-0.5 font-mono text-[10px] font-bold text-zinc-900">
-                  ERR // 00
+                  {warningMeta.badge}
                 </span>
                 <h2
                   id="send-result-title"
@@ -85,16 +111,16 @@ export default function SendResultModal({
                 </h2>
               </div>
               <span className="font-mono text-[10px] tracking-widest text-zinc-500">
-                EMPTY-BUF
+                {warningMeta.tag}
               </span>
             </div>
 
             <div className="mt-4 flex flex-col items-center justify-center border border-dashed border-zinc-700 bg-black/80 px-4 py-6 text-center">
               <p className="font-mono text-sm font-semibold tracking-wider text-[#ffe196]">
-                請輸入內容再按傳送
+                {warningMeta.message}
               </p>
               <p className="mt-1.5 font-mono text-[10px] uppercase tracking-widest text-zinc-400">
-                PLEASE INPUT DATA BEFORE SENDING
+                {warningMeta.sub}
               </p>
             </div>
           </>

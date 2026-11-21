@@ -152,6 +152,7 @@ export default function TelephoneCanvas({
   mainLightRef,
   resetViewRef,
   focusViewRef,
+  clearSegmentsRef,
 }) {
   const mountRef = useRef(null);
   const isDarkModeRef = useRef(isDarkMode);
@@ -188,6 +189,32 @@ export default function TelephoneCanvas({
   useEffect(() => {
     sendDirectionRef.current = sendDirection;
   }, [sendDirection]);
+
+  useEffect(() => {
+    if (!clearSegmentsRef) return undefined;
+    clearSegmentsRef.current = () => {
+      smallSegmentStateRef.current = Array.from(
+        { length: SMALL_DIGIT_COUNT },
+        () => ({})
+      );
+      const objs = sceneObjectsRef.current;
+      if (!objs) return;
+      objs.smallSegmentEntries.forEach((entry) => {
+        applySmallSegmentAppearance(
+          entry,
+          false,
+          smallGlowRef.current,
+          isDarkModeRef.current
+        );
+      });
+      if (objs.syncBigSegmentsWithDigit) {
+        objs.syncBigSegmentsWithDigit(0);
+      }
+    };
+    return () => {
+      clearSegmentsRef.current = null;
+    };
+  }, [clearSegmentsRef]);
 
   useEffect(() => {
     mosaicCellSizeRef.current = mosaicCellSize;

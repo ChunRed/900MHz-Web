@@ -44,6 +44,10 @@ const smoothStep = (edge0, edge1, x) => {
 const DATASHEET_TRANSITION_MS = 1350;
 const SEND_ENTER_MS = 2850;
 const SEND_EXIT_MS = 1150;
+const SEND_COOLDOWN_MS = 15000;
+const DUPLICATE_BLOCK_MS = 60000;
+const LAST_SEND_AT_KEY = "900mhz_last_send_at";
+const LAST_SEND_RECORD_KEY = "900mhz_last_send_record";
 const SOCKET_URL =
   process.env.NEXT_PUBLIC_SOCKET_URL || "https://900mhz-server.nosidehere.space";
 
@@ -73,6 +77,7 @@ const checkIsMobilePhone = () => {
 export default function Home() {
   const resetViewRef = useRef(null);
   const focusViewRef = useRef(null);
+  const clearSegmentsRef = useRef(null);
   const mainLightRef = useRef(null);
   const datasheetRafRef = useRef(null);
   const sendRafRef = useRef(null);
@@ -86,6 +91,10 @@ export default function Home() {
     matrix: null,
     seq: 0,
   });
+  // 送出冷卻時間倒數（秒）與通知彈窗類型
+  const [cooldownUntil, setCooldownUntil] = useState(0);
+  const [cooldownRemainingSec, setCooldownRemainingSec] = useState(0);
+  const [sendNoticeType, setSendNoticeType] = useState("empty");
 
   // 初始畫面預設為夜間模式，並顯示初始操作說明視窗
   const [isDarkMode, setIsDarkMode] = useState(true);
@@ -204,14 +213,57 @@ export default function Home() {
       digit.every((seg) => seg === 0)
     );
     if (isEmpty) {
+      setSendNoticeType("empty");
       setIsSendModalOpen(true);
       return;
     }
 
+    const now = Date.now();
+    // 單次送出冷卻時間檢查（15 秒）
+    if (cooldownUntil > now) {
+      setCooldownRemainingSec(Math.ceil((cooldownUntil - now) / 1000));
+      setSendNoticeType("cooldown");
+      setIsSendModalOpen(true);
+      return;
+    }
+
+    // 禁止短時間內（60 秒）重複送出完全相同的內容
+    const payload = JSON.stringify(segmentMatrix);
+    try {
+      const rawRecord = window.localStorage.getItem(LAST_SEND_RECORD_KEY);
+      if (rawRecord) {
+        const parsed = JSON.parse(rawRecord);
+        if (
+          parsed?.payload === payload &&
+          typeof parsed.time === "number" &&
+          now - parsed.time < DUPLICATE_BLOCK_MS
+        ) {
+          setSendNoticeType("duplicate");
+          setIsSendModalOpen(true);
+          return;
+        }
+      }
+    } catch {
+      // 忽略 localStorage 讀取異常
+    }
+
+    const nextCooldownUntil = now + SEND_COOLDOWN_MS;
+    setCooldownUntil(nextCooldownUntil);
+    setCooldownRemainingSec(Math.ceil(SEND_COOLDOWN_MS / 1000));
+    try {
+      window.localStorage.setItem(LAST_SEND_AT_KEY, String(now));
+      window.localStorage.setItem(
+        LAST_SEND_RECORD_KEY,
+        JSON.stringify({ payload, time: now })
+      );
+    } catch {
+      // 忽略 localStorage 寫入異常
+    }
+
     // 透過 Socket.IO 將 8x7 陣列數值傳送給 server（event 名稱：client_msg）
     lastSelfSentRef.current = {
-      payload: JSON.stringify(segmentMatrix),
-      time: Date.now(),
+      payload,
+      time: now,
     };
     if (socketRef.current) {
       if (!socketRef.current.connected) {
@@ -230,6 +282,47 @@ export default function Home() {
       runSendTransition(0);
     }
   };
+
+  const handleCloseExpandedSendNotice = () => {
+    if (isTransitioningSend || sendProgress <= 0.01) return;
+    // 關閉傳送通知後自動清空原本輸入的 8x7 內容與 3D 模型七段亮燈狀態
+    setSegmentMatrix(createEmptySegmentMatrix());
+    setActiveDigitIndex(0);
+    clearSegmentsRef.current?.();
+    runSendTransition(0);
+  };
+
+  useEffect(() => {
+    const initTimer = setTimeout(() => {
+      try {
+        const savedAt = Number(window.localStorage.getItem(LAST_SEND_AT_KEY));
+        if (Number.isFinite(savedAt) && savedAt > 0) {
+          const until = savedAt + SEND_COOLDOWN_MS;
+          if (until > Date.now()) {
+            setCooldownUntil(until);
+            setCooldownRemainingSec(Math.ceil((until - Date.now()) / 1000));
+          }
+        }
+      } catch {
+        // 忽略 localStorage 讀取異常
+      }
+    }, 0);
+    return () => clearTimeout(initTimer);
+  }, []);
+
+  useEffect(() => {
+    if (!cooldownUntil) return undefined;
+    const timer = setInterval(() => {
+      const remaining = cooldownUntil - Date.now();
+      if (remaining <= 0) {
+        setCooldownRemainingSec(0);
+        setCooldownUntil(0);
+      } else {
+        setCooldownRemainingSec(Math.ceil(remaining / 1000));
+      }
+    }, 250);
+    return () => clearInterval(timer);
+  }, [cooldownUntil]);
 
   useEffect(() => {
     const updateDeviceType = () => {
@@ -467,6 +560,7 @@ export default function Home() {
           mainLightRef={mainLightRef}
           resetViewRef={resetViewRef}
           focusViewRef={focusViewRef}
+          clearSegmentsRef={clearSegmentsRef}
         />
         </div>
 
@@ -531,11 +625,7 @@ export default function Home() {
           sendBlinkOpacity={sendBlinkOpacity}
           sendExpandT={sendExpandT}
           canCloseSend={canCloseSend}
-          onCloseSend={() => {
-            if (!isTransitioningSend && sendProgress > 0.01) {
-              runSendTransition(0);
-            }
-          }}
+          onCloseSend={handleCloseExpandedSendNotice}
         />
 
         {/* 指向目前所選小七段顯示器的上下飄動箭頭 */}
@@ -608,6 +698,7 @@ export default function Home() {
           isTransitioning={
             isTransitioningDatasheet || isTransitioningSend || isSendActive
           }
+          cooldownSec={cooldownRemainingSec}
           hudOpacity={sendHudOpacity}
           isDarkMode={isDarkMode}
           onBack={() => {
@@ -621,10 +712,12 @@ export default function Home() {
           onSend={handleClickSend}
         />
 
-        {/* 傳送內容通知彈窗（未輸入時提示請輸入內容，已輸入時顯示 8x7 小七段亮起狀態與陣列） */}
+        {/* 傳送內容通知彈窗（未輸入、冷卻中或重複內容提示） */}
         <SendResultModal
           visible={isSendModalOpen}
           segmentMatrix={segmentMatrix}
+          noticeType={sendNoticeType}
+          cooldownSec={cooldownRemainingSec}
           isDarkMode={isDarkMode}
           onClose={handleCloseSendModal}
         />

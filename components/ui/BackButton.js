@@ -3,15 +3,18 @@ export default function BackButton({
   isDatasheetButtonBack = false,
   isDatasheetView = false,
   isTransitioning = false,
+  cooldownSec = 0,
   hudOpacity = 1,
   isDarkMode,
   onBack,
   onSend,
 }) {
   const showBack = isFocused || isDatasheetButtonBack;
+  const isCoolingDown = !showBack && cooldownSec > 0;
   const isHidden = hudOpacity <= 0.01;
+  const isDisabled = isTransitioning || isHidden || isCoolingDown;
   const handleClick = () => {
-    if (isTransitioning || isHidden) return;
+    if (isDisabled) return;
     if (showBack) {
       onBack?.();
     } else {
@@ -32,10 +35,16 @@ export default function BackButton({
       <button
         type="button"
         onClick={handleClick}
-        disabled={isTransitioning || isHidden}
-        aria-label={showBack ? "返回主畫面 (Back)" : "傳送七段顯示器內容 (Send)"}
+        disabled={isDisabled}
+        aria-label={
+          showBack
+            ? "返回主畫面 (Back)"
+            : isCoolingDown
+            ? `傳送冷卻中，剩餘 ${cooldownSec} 秒`
+            : "傳送七段顯示器內容 (Send)"
+        }
         className={`group flex items-stretch overflow-hidden border shadow-md backdrop-blur-sm transition-all duration-200 ${
-          isTransitioning
+          isDisabled
             ? "cursor-not-allowed opacity-60"
             : "cursor-pointer hover:scale-105 hover:shadow-lg active:scale-95"
         } ${
@@ -77,7 +86,11 @@ export default function BackButton({
 
         {/* 右側按鈕主文字 */}
         <span className="flex items-center justify-center whitespace-nowrap px-5 py-2 font-mono text-xs font-semibold tracking-wider">
-          {showBack ? "Back 返回" : "Send 傳送"}
+          {showBack
+            ? "Back 返回"
+            : isCoolingDown
+            ? `冷卻中 ${cooldownSec}s`
+            : "Send 傳送"}
         </span>
       </button>
     </div>
