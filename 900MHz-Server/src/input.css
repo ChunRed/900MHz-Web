@@ -1,0 +1,39 @@
+@import "tailwindcss";
+
+@keyframes rowFlash {
+  0% { background-color: #ecfdf5; }
+  100% { background-color: transparent; }
+}
+
+.row-flash {
+  animation: rowFlash 1s ease-out;
+}
+
+/* Subtle HUD corner brackets */
+.hud-frame {
+  position: relative;
+}
+
+.hud-frame::before,
+.hud-frame::after {
+  content: "";
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  pointer-events: none;
+  border-color: #171717;
+}
+
+.hud-frame::before {
+  top: -1px;
+  left: -1px;
+  border-top: 2px solid;
+  border-left: 2px solid;
+}
+
+.hud-frame::after {
+  bottom: -1px;
+  right: -1px;
+  border-bottom: 2px solid;
+  border-right: 2px solid;
+}

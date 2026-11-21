@@ -1,0 +1,623 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ESP32 特殊動態控制台 · 900MHz Server Viewer</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/esp32-animations.js"></script>
+</head>
+<body class="bg-white text-neutral-900 antialiased selection:bg-neutral-900 selection:text-white">
+  <div class="min-h-screen max-w-6xl mx-auto px-4 sm:px-6 py-8">
+
+    <!-- Header -->
+    <header class="mb-6 pb-5 border-b border-neutral-200">
+      <div class="flex items-center justify-between mb-3">
+        <a
+          href="/"
+          class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono font-semibold border border-neutral-300 text-neutral-700 hover:bg-neutral-100 hover:text-black transition"
+        >
+          <span>←</span>
+          <span>返回監看主頁</span>
+        </a>
+        <span class="text-[11px] font-mono uppercase tracking-[0.18em] text-neutral-400">
+          ESP32 ANIMATION CONTROLLER
+        </span>
+      </div>
+
+      <div class="flex flex-col items-center">
+        <div class="flex items-center gap-2 text-[11px] font-mono uppercase tracking-[0.2em] text-neutral-400 mb-1.5">
+          <span>900MHz SERVER VIEWER</span>
+          <span>/</span>
+          <span>EVENT: esp32-msg [1, MODE, SPEED]</span>
+        </div>
+        <h1 class="text-center text-2xl sm:text-3xl font-bold tracking-tight text-black">
+          ESP32 特殊動態控制台
+        </h1>
+      </div>
+
+      <!-- Compact Telemetry Status Strip -->
+      <div class="mt-5 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs font-mono">
+        <div class="border border-neutral-200 bg-neutral-50/60 px-3 py-2 flex items-center justify-between">
+          <span class="text-neutral-500">LINK</span>
+          <span id="conn-status" class="inline-flex items-center gap-1.5 font-semibold text-amber-600">
+            <span id="conn-dot" class="w-2 h-2 rounded-full bg-amber-500"></span>
+            <span id="conn-text">CONNECTING</span>
+          </span>
+        </div>
+        <div class="border border-neutral-200 bg-neutral-50/60 px-3 py-2 flex items-center justify-between">
+          <span class="text-neutral-500">EVENT</span>
+          <span class="font-semibold text-neutral-900">esp32-msg</span>
+        </div>
+        <div class="border border-neutral-200 bg-neutral-50/60 px-3 py-2 flex items-center justify-between">
+          <span class="text-neutral-500">PREVIEW</span>
+          <span id="preview-mode-badge" class="font-semibold tabular-nums text-neutral-900">MODE 01 (1)</span>
+        </div>
+        <div class="border border-neutral-200 bg-neutral-50/60 px-3 py-2 flex items-center justify-between">
+          <span class="text-neutral-500">ESP32 ACTIVE</span>
+          <span id="server-active-mode" class="font-semibold tabular-nums text-neutral-400">NONE</span>
+        </div>
+      </div>
+
+      <!-- Endpoint Switcher Bar -->
+      <div class="mt-3 border border-neutral-200 bg-neutral-50/40 px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
+        <div class="flex items-center gap-2 min-w-0">
+          <span class="text-neutral-500 shrink-0">ENDPOINT</span>
+          <span id="active-endpoint-url" class="text-neutral-900 font-semibold truncate"></span>
+        </div>
+        <div class="inline-flex border border-neutral-300 bg-white p-0.5 shrink-0" role="group" aria-label="Socket.IO Endpoint Switcher">
+          <button
+            id="btn-env-prod"
+            type="button"
+            class="px-2.5 py-1 text-[11px] font-mono font-semibold transition cursor-pointer"
+          >
+            PROD
+          </button>
+          <button
+            id="btn-env-local"
+            type="button"
+            class="px-2.5 py-1 text-[11px] font-mono font-semibold transition cursor-pointer"
+          >
+            LOCAL
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Center Stage: 8x Seven-Segment Live Animation Preview HUD -->
+    <section class="mb-7 hud-frame border border-neutral-200 bg-white p-4 sm:p-6">
+      <div class="flex flex-wrap items-center justify-between gap-2 mb-4 pb-3 border-b border-neutral-100">
+        <div class="flex items-center gap-2.5">
+          <span class="w-1.5 h-4 bg-neutral-900 inline-block"></span>
+          <h2 class="text-xs font-mono font-semibold uppercase tracking-wider text-neutral-800">
+            8-Unit 7-Segment Simulation Canvas (2D Coordinate Engine)
+          </h2>
+          <span class="text-[11px] font-mono px-2 py-0.5 border border-emerald-200 bg-emerald-50 text-emerald-700">
+            PREVIEW
+          </span>
+        </div>
+        <div class="flex items-center gap-3 text-xs font-mono text-neutral-500">
+          <span id="hud-telemetry" class="tabular-nums text-neutral-700">--</span>
+          <label class="inline-flex items-center gap-1.5 cursor-pointer select-none text-[11px] text-neutral-500">
+            <input id="toggle-overlay" type="checkbox" checked class="accent-neutral-900 cursor-pointer" />
+            <span>2D HUD BOX</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Unified 8-Digit SVG Canvas (exact 2D physical aspect ratio: pitch=1.35, width=1.0, height=2.0) -->
+      <div class="w-full bg-neutral-50/70 border border-neutral-200 px-3 sm:px-6 py-6 sm:py-8 overflow-x-auto">
+        <div class="min-w-[600px] max-w-4xl mx-auto">
+          <svg
+            id="seg-canvas-svg"
+            viewBox="-25 -22 930 214"
+            class="w-full h-auto block"
+            role="img"
+            aria-label="8 Seven-Segment Display Animation Preview"
+          >
+            <!-- Subtle engineering grid background -->
+            <defs>
+              <pattern id="hud-grid" width="20" height="20" patternUnits="userSpaceOnUse">
+                <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#f0f0f0" stroke-width="1" />
+              </pattern>
+            </defs>
+            <rect x="-25" y="-22" width="930" height="214" fill="url(#hud-grid)" />
+
+            <!-- Digit segments group populated once on init -->
+            <g id="digits-layer"></g>
+
+            <!-- Optional 2D physical snake-turn tracking overlay (for Mode 1) -->
+            <g id="hud-snake-overlay" visibility="hidden">
+              <polyline
+                id="hud-snake-body"
+                points=""
+                fill="none"
+                stroke="rgba(5, 150, 105, 0.14)"
+                stroke-width="96"
+                stroke-linecap="square"
+                stroke-linejoin="miter"
+              />
+              <polyline
+                id="hud-snake-spine"
+                points=""
+                fill="none"
+                stroke="#059669"
+                stroke-width="1.5"
+                stroke-dasharray="5 4"
+                stroke-linejoin="miter"
+              />
+              <circle
+                id="hud-snake-head"
+                cx="0"
+                cy="0"
+                r="4"
+                fill="#059669"
+              />
+            </g>
+          </svg>
+        </div>
+      </div>
+
+      <!-- Formula Readout Strip -->
+      <div class="mt-3 flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono text-neutral-500">
+        <div>
+          <span class="text-neutral-400 mr-1.5">FORMULA:</span>
+          <code id="hud-formula" class="text-neutral-800 bg-neutral-100 px-2 py-0.5 border border-neutral-200">--</code>
+        </div>
+        <span id="hud-active-count" class="tabular-nums">ACTIVE SEGMENTS: 00 / 56</span>
+      </div>
+    </section>
+
+    <!-- Animation Selection Buttons (3 Modes) -->
+    <section class="mb-5">
+      <div class="flex items-center gap-2.5 mb-3">
+        <span class="w-1.5 h-4 bg-neutral-900 inline-block"></span>
+        <h2 class="text-sm font-mono font-semibold uppercase tracking-wider text-neutral-900">
+          選擇特殊動態效果 (點擊即時預覽)
+        </h2>
+      </div>
+
+      <div id="mode-buttons-grid" class="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <!-- Populated from ESP32Animations.MODES -->
+      </div>
+    </section>
+
+    <!-- Speed Adjustment Control (Levels 1 - 3) -->
+    <section class="mb-7 border border-neutral-200 bg-white p-4">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div class="flex items-center gap-2.5">
+          <span class="w-1.5 h-4 bg-neutral-900 inline-block"></span>
+          <div>
+            <h2 class="text-xs font-mono font-semibold uppercase tracking-wider text-neutral-900">
+              動態速度調整 (SPEED LEVEL 1 – 3)
+            </h2>
+            <p class="text-[11px] font-mono text-neutral-400">
+              目前預設速度為 1 (1× 標準)，切換可即時預覽速度變化
+            </p>
+          </div>
+        </div>
+
+        <div id="speed-buttons-group" class="grid grid-cols-3 gap-2 sm:w-80" role="group" aria-label="Animation Speed Selector">
+          <!-- Populated by JS -->
+        </div>
+      </div>
+    </section>
+
+    <!-- Bottom Submit Action Panel -->
+    <section class="hud-frame border border-neutral-200 bg-neutral-50/50 p-4 sm:p-5">
+      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div class="space-y-1">
+          <div class="flex items-center gap-2 text-xs font-mono">
+            <span class="text-neutral-500">READY TO EMIT:</span>
+            <span id="submit-payload-preview" class="font-bold text-neutral-900 bg-white border border-neutral-300 px-2 py-0.5 tabular-nums">
+              esp32-msg → [1, 1, 1]
+            </span>
+          </div>
+          <p id="submit-status-msg" class="text-xs font-mono text-neutral-500">
+            選擇動態與速度預覽確認後，按下右側送出按鍵即可發送 [1, mode, speed] 指令給伺服器與實體 ESP32。
+          </p>
+        </div>
+
+        <button
+          id="btn-emit-esp32"
+          type="button"
+          class="w-full sm:w-auto inline-flex items-center justify-center gap-2.5 px-6 py-3 text-xs font-mono font-bold tracking-wider uppercase bg-neutral-900 text-white hover:bg-neutral-700 active:bg-black transition border border-neutral-900 cursor-pointer shrink-0"
+        >
+          <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+          <span id="btn-emit-label">送出指令 [1, 1, 1]</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="mt-5 flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono text-neutral-400">
+      <span>2D LUT: DIGIT_PITCH=1.35 · SEG[A..G] → (rx, ry)</span>
+      <span id="socket-id-label">SOCKET ID: --</span>
+    </footer>
+  </div>
+
+  <script>
+    // =========================================================
+    // Socket.IO Endpoint Config (Shared PROD <-> LOCAL setting)
+    // =========================================================
+    const isLocalHost = ['localhost', '127.0.0.1'].includes(window.location.hostname);
+    const SOCKET_ENDPOINTS = {
+      prod: 'https://900mhz-server.nosidehere.space',
+      local: isLocalHost ? window.location.origin : 'http://localhost:3000'
+    };
+
+    const ENV_STORAGE_KEY = '900mhz_socket_env';
+    let currentEnv = localStorage.getItem(ENV_STORAGE_KEY) || (isLocalHost ? 'local' : 'prod');
+    if (!SOCKET_ENDPOINTS[currentEnv]) currentEnv = 'prod';
+
+    // Geometry scale for unified SVG canvas: 1.0 logical unit = 84 SVG units
+    // Canvas logical width = 10.45 -> 877.8 SVG units; height = 2.0 -> 168 SVG units
+    const SCALE = 84;
+    const DIGIT_W = 1.0 * SCALE;      // 84
+    const DIGIT_H = 2.0 * SCALE;      // 168
+    const DIGIT_PITCH_PX = ESP32Animations.DIGIT_PITCH * SCALE; // 113.4
+
+    // Standard 7-segment polygons in 84 x 168 digit box (exact A..G order)
+    const LOCAL_SEG_POLYGONS = [
+      '14,8 21,2 63,2 70,8 63,14 21,14',        // 0: A (top)
+      '75,13 81,20 81,71 75,78 69,71 69,20',    // 1: B (top-right)
+      '75,90 81,97 81,148 75,155 69,148 69,97', // 2: C (bottom-right)
+      '14,160 21,154 63,154 70,160 63,166 21,166', // 3: D (bottom)
+      '9,90 15,97 15,148 9,155 3,148 3,97',     // 4: E (bottom-left)
+      '9,13 15,20 15,71 9,78 3,71 3,20',        // 5: F (top-left)
+      '14,84 21,78 63,78 70,84 63,90 21,90'     // 6: G (middle)
+    ];
+
+    const SEG_ON_COLOR = '#059669';
+    const SEG_OFF_COLOR = '#e5e7eb';
+
+    const SPEED_LEVELS = [
+      { value: 1, label: '1', desc: '1× 標準', multiplier: 1.0 },
+      { value: 2, label: '2', desc: '2× 加速', multiplier: 2.0 },
+      { value: 3, label: '3', desc: '3× 高速', multiplier: 3.0 }
+    ];
+
+    let socket = null;
+    let selectedModeId = 1;
+    let selectedSpeed = 1;
+    let animVirtualMs = 0;
+    let lastFrameTime = performance.now();
+    let segPolygonNodes = []; // [8][7] cached SVG polygon references for 60fps updates
+
+    // DOM refs
+    const connStatusEl = document.getElementById('conn-status');
+    const connDotEl = document.getElementById('conn-dot');
+    const connTextEl = document.getElementById('conn-text');
+    const socketIdLabelEl = document.getElementById('socket-id-label');
+    const activeEndpointUrlEl = document.getElementById('active-endpoint-url');
+    const btnEnvProd = document.getElementById('btn-env-prod');
+    const btnEnvLocal = document.getElementById('btn-env-local');
+    const previewModeBadgeEl = document.getElementById('preview-mode-badge');
+    const serverActiveModeEl = document.getElementById('server-active-mode');
+    const digitsLayerEl = document.getElementById('digits-layer');
+    const hudSnakeOverlayEl = document.getElementById('hud-snake-overlay');
+    const hudSnakeBodyEl = document.getElementById('hud-snake-body');
+    const hudSnakeSpineEl = document.getElementById('hud-snake-spine');
+    const hudSnakeHeadEl = document.getElementById('hud-snake-head');
+    const toggleOverlayEl = document.getElementById('toggle-overlay');
+    const hudTelemetryEl = document.getElementById('hud-telemetry');
+    const hudFormulaEl = document.getElementById('hud-formula');
+    const hudActiveCountEl = document.getElementById('hud-active-count');
+    const modeButtonsGridEl = document.getElementById('mode-buttons-grid');
+    const speedButtonsGroupEl = document.getElementById('speed-buttons-group');
+    const submitPayloadPreviewEl = document.getElementById('submit-payload-preview');
+    const submitStatusMsgEl = document.getElementById('submit-status-msg');
+    const btnEmitEsp32 = document.getElementById('btn-emit-esp32');
+    const btnEmitLabelEl = document.getElementById('btn-emit-label');
+
+    // ---------------------------------------------------------
+    // 1. Build Unified 8-Digit SVG Scene Once (No DOM Thrashing)
+    // ---------------------------------------------------------
+    function initSvgCanvas() {
+      const SVG_NS = 'http://www.w3.org/2000/svg';
+      digitsLayerEl.innerHTML = '';
+      segPolygonNodes = [];
+
+      for (let d = 0; d < ESP32Animations.NUM_DIGITS; d++) {
+        const xOffset = d * DIGIT_PITCH_PX;
+        const g = document.createElementNS(SVG_NS, 'g');
+        g.setAttribute('transform', `translate(${xOffset.toFixed(1)}, 0)`);
+
+        // Subtle digit label above each unit (D1..D8)
+        const label = document.createElementNS(SVG_NS, 'text');
+        label.setAttribute('x', String(DIGIT_W / 2));
+        label.setAttribute('y', '-8');
+        label.setAttribute('text-anchor', 'middle');
+        label.setAttribute('font-family', 'ui-monospace, SFMono-Regular, Menlo, monospace');
+        label.setAttribute('font-size', '11');
+        label.setAttribute('font-weight', '600');
+        label.setAttribute('fill', '#737373');
+        label.textContent = `D${d + 1}`;
+        g.appendChild(label);
+
+        const digitPolys = [];
+        for (let s = 0; s < ESP32Animations.NUM_SEGS; s++) {
+          const poly = document.createElementNS(SVG_NS, 'polygon');
+          poly.setAttribute('points', LOCAL_SEG_POLYGONS[s]);
+          poly.setAttribute('fill', SEG_OFF_COLOR);
+          g.appendChild(poly);
+          digitPolys.push(poly);
+        }
+
+        digitsLayerEl.appendChild(g);
+        segPolygonNodes.push(digitPolys);
+      }
+    }
+
+    // ---------------------------------------------------------
+    // 2. Mode Selection Buttons (Preview Only Until Submit)
+    // ---------------------------------------------------------
+    function renderModeButtons() {
+      modeButtonsGridEl.innerHTML = ESP32Animations.MODES.map((mode) => {
+        const isSelected = mode.id === selectedModeId;
+        const cardClass = isSelected
+          ? 'border-neutral-900 bg-neutral-900 text-white shadow-sm'
+          : 'border-neutral-200 bg-white text-neutral-900 hover:border-neutral-400 hover:bg-neutral-50/70';
+        const badgeClass = isSelected
+          ? 'border-emerald-400/50 bg-emerald-500/20 text-emerald-300'
+          : 'border-neutral-200 bg-neutral-100 text-neutral-600';
+        const descClass = isSelected ? 'text-neutral-300' : 'text-neutral-500';
+        const subClass = isSelected ? 'text-neutral-400' : 'text-neutral-400';
+
+        return `
+          <button
+            type="button"
+            data-mode-id="${mode.id}"
+            class="text-left p-4 border transition cursor-pointer flex flex-col justify-between gap-3 ${cardClass}"
+          >
+            <div>
+              <div class="flex items-center justify-between gap-2 mb-2">
+                <span class="text-[11px] font-mono font-bold px-2 py-0.5 border ${badgeClass}">
+                  ${mode.code} · INT ${mode.id}
+                </span>
+                ${isSelected ? '<span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>' : ''}
+              </div>
+              <div class="text-sm font-bold tracking-tight mb-0.5">${mode.name}</div>
+              <div class="text-[11px] font-mono ${subClass} mb-2">${mode.subtitle}</div>
+              <p class="text-xs leading-relaxed ${descClass}">${mode.description}</p>
+            </div>
+            <div class="pt-2 border-t ${isSelected ? 'border-neutral-700 text-neutral-300' : 'border-neutral-100 text-neutral-500'} text-[10px] font-mono truncate">
+              ${mode.formulaNote}
+            </div>
+          </button>
+        `;
+      }).join('');
+
+      modeButtonsGridEl.querySelectorAll('button[data-mode-id]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const nextId = Number(btn.getAttribute('data-mode-id'));
+          selectMode(nextId);
+        });
+      });
+    }
+
+    function getCurrentPayload() {
+      return [1, Number.parseInt(selectedModeId, 10), Number.parseInt(selectedSpeed, 10)];
+    }
+
+    function syncControlReadouts() {
+      const mode = ESP32Animations.getModeById(selectedModeId);
+      const payloadStr = JSON.stringify(getCurrentPayload());
+      previewModeBadgeEl.textContent = `${mode.code} · SPD ${selectedSpeed}`;
+      hudFormulaEl.textContent = mode.formulaNote;
+      submitPayloadPreviewEl.textContent = `esp32-msg → ${payloadStr}`;
+      btnEmitLabelEl.textContent = `送出指令 ${payloadStr}`;
+    }
+
+    function renderSpeedButtons() {
+      speedButtonsGroupEl.innerHTML = SPEED_LEVELS.map((spd) => {
+        const isSelected = spd.value === selectedSpeed;
+        const btnClass = isSelected
+          ? 'border-neutral-900 bg-neutral-900 text-white'
+          : 'border-neutral-200 bg-neutral-50/70 text-neutral-700 hover:border-neutral-400 hover:bg-neutral-100';
+        const subClass = isSelected ? 'text-emerald-300' : 'text-neutral-400';
+
+        return `
+          <button
+            type="button"
+            data-speed-val="${spd.value}"
+            class="px-3 py-2 border font-mono transition cursor-pointer flex flex-col items-center justify-center ${btnClass}"
+          >
+            <span class="text-xs font-bold leading-none">SPEED ${spd.label}</span>
+            <span class="text-[10px] mt-1 ${subClass}">${spd.desc}</span>
+          </button>
+        `;
+      }).join('');
+
+      speedButtonsGroupEl.querySelectorAll('button[data-speed-val]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const nextSpeed = Number(btn.getAttribute('data-speed-val'));
+          selectSpeed(nextSpeed);
+        });
+      });
+    }
+
+    function selectMode(modeId) {
+      selectedModeId = modeId;
+      animVirtualMs = 0;
+      lastFrameTime = performance.now();
+
+      syncControlReadouts();
+      renderModeButtons();
+    }
+
+    function selectSpeed(speedVal) {
+      selectedSpeed = speedVal;
+      syncControlReadouts();
+      renderSpeedButtons();
+    }
+
+    // ---------------------------------------------------------
+    // 3. 60 FPS Preview Animation Loop
+    // ---------------------------------------------------------
+    function animationTick(now) {
+      const dt = Math.min(now - lastFrameTime, 100);
+      lastFrameTime = now;
+
+      const speedCfg = SPEED_LEVELS.find((s) => s.value === selectedSpeed) || SPEED_LEVELS[0];
+      animVirtualMs += dt * speedCfg.multiplier;
+
+      const mode = ESP32Animations.getModeById(selectedModeId);
+      const frame = mode.evaluate(animVirtualMs);
+
+      let activeCount = 0;
+      for (let d = 0; d < ESP32Animations.NUM_DIGITS; d++) {
+        for (let s = 0; s < ESP32Animations.NUM_SEGS; s++) {
+          const isOn = frame.matrix[d][s] === 1;
+          if (isOn) activeCount += 1;
+          segPolygonNodes[d][s].setAttribute('fill', isOn ? SEG_ON_COLOR : SEG_OFF_COLOR);
+        }
+      }
+
+      hudTelemetryEl.textContent = `${frame.telemetry} · ${speedCfg.multiplier}×`;
+      hudActiveCountEl.textContent = `ACTIVE SEGMENTS: ${String(activeCount).padStart(2, '0')} / 56`;
+
+      if (frame.overlaySnake && toggleOverlayEl.checked) {
+        const ptsStr = frame.overlaySnake.points
+          .map((pt) => `${(pt.x * SCALE).toFixed(1)},${(pt.y * SCALE).toFixed(1)}`)
+          .join(' ');
+        const head = frame.overlaySnake.points[0];
+        hudSnakeBodyEl.setAttribute('points', ptsStr);
+        hudSnakeBodyEl.setAttribute('stroke-width', (frame.overlaySnake.halfThick * 2 * SCALE).toFixed(1));
+        hudSnakeSpineEl.setAttribute('points', ptsStr);
+        hudSnakeHeadEl.setAttribute('cx', (head.x * SCALE).toFixed(1));
+        hudSnakeHeadEl.setAttribute('cy', (head.y * SCALE).toFixed(1));
+        hudSnakeOverlayEl.setAttribute('visibility', 'visible');
+      } else {
+        hudSnakeOverlayEl.setAttribute('visibility', 'hidden');
+      }
+
+      requestAnimationFrame(animationTick);
+    }
+
+    // ---------------------------------------------------------
+    // 4. Socket.IO Connection & Endpoint Switcher
+    // ---------------------------------------------------------
+    function formatTime(d) {
+      return [
+        String(d.getHours()).padStart(2, '0'),
+        String(d.getMinutes()).padStart(2, '0'),
+        String(d.getSeconds()).padStart(2, '0')
+      ].join(':');
+    }
+
+    function updateEndpointUI() {
+      activeEndpointUrlEl.textContent = SOCKET_ENDPOINTS[currentEnv];
+
+      const activeBtnClass = 'px-2.5 py-1 text-[11px] font-mono font-semibold bg-neutral-900 text-white transition cursor-pointer';
+      const inactiveBtnClass = 'px-2.5 py-1 text-[11px] font-mono font-semibold text-neutral-500 hover:text-neutral-900 transition cursor-pointer';
+
+      btnEnvProd.className = currentEnv === 'prod' ? activeBtnClass : inactiveBtnClass;
+      btnEnvLocal.className = currentEnv === 'local' ? activeBtnClass : inactiveBtnClass;
+    }
+
+    function setConnectionState(state, socketId = '--') {
+      if (state === 'online') {
+        connStatusEl.className = 'inline-flex items-center gap-1.5 font-semibold text-emerald-700';
+        connDotEl.className = 'w-2 h-2 rounded-full bg-emerald-500 animate-pulse';
+        connTextEl.textContent = 'ONLINE';
+        socketIdLabelEl.textContent = `SOCKET ID: ${socketId}`;
+      } else if (state === 'connecting') {
+        connStatusEl.className = 'inline-flex items-center gap-1.5 font-semibold text-amber-600';
+        connDotEl.className = 'w-2 h-2 rounded-full bg-amber-500';
+        connTextEl.textContent = 'CONNECTING';
+        socketIdLabelEl.textContent = 'SOCKET ID: --';
+      } else {
+        connStatusEl.className = 'inline-flex items-center gap-1.5 font-semibold text-red-600';
+        connDotEl.className = 'w-2 h-2 rounded-full bg-red-500';
+        connTextEl.textContent = 'OFFLINE';
+        socketIdLabelEl.textContent = 'SOCKET ID: --';
+      }
+    }
+
+    function updateServerActiveState(payload, fromBroadcast) {
+      if (!Array.isArray(payload) || payload.length !== 3) return;
+      const [cmd, modeId, speedVal] = payload;
+      const mode = ESP32Animations.MODES.find((m) => m.id === Number(modeId));
+      const payloadStr = JSON.stringify([cmd, modeId, speedVal]);
+
+      serverActiveModeEl.textContent = `${payloadStr}`;
+      serverActiveModeEl.className = 'font-semibold tabular-nums text-emerald-700';
+
+      if (fromBroadcast) {
+        const modeDesc = mode ? `${mode.name} · 速度 ${speedVal}` : `MODE ${modeId} · 速度 ${speedVal}`;
+        submitStatusMsgEl.textContent = `[${formatTime(new Date())}] 伺服器已廣播 esp32-msg = ${payloadStr} (${modeDesc})`;
+        submitStatusMsgEl.className = 'text-xs font-mono text-emerald-700 font-semibold';
+      }
+    }
+
+    function connectSocket(env) {
+      currentEnv = env;
+      localStorage.setItem(ENV_STORAGE_KEY, env);
+      updateEndpointUI();
+      setConnectionState('connecting');
+
+      if (socket) {
+        socket.removeAllListeners();
+        socket.disconnect();
+      }
+
+      const targetUrl = SOCKET_ENDPOINTS[env];
+      socket = io(targetUrl, {
+        transports: ['websocket', 'polling']
+      });
+
+      socket.on('connect', () => {
+        setConnectionState('online', socket.id);
+      });
+
+      socket.on('disconnect', () => {
+        setConnectionState('offline');
+      });
+
+      socket.on('connect_error', () => {
+        setConnectionState('offline');
+      });
+
+      socket.on('esp32_state_init', (activeState) => {
+        updateServerActiveState(activeState, false);
+      });
+
+      socket.on('esp32-msg', (payload) => {
+        updateServerActiveState(payload, true);
+      });
+    }
+
+    btnEnvProd.addEventListener('click', () => {
+      if (currentEnv !== 'prod') connectSocket('prod');
+    });
+
+    btnEnvLocal.addEventListener('click', () => {
+      if (currentEnv !== 'local') connectSocket('local');
+    });
+
+    // Emit [1, modeIndex, speedValue] on 'esp32-msg' ONLY when Submit button is clicked
+    btnEmitEsp32.addEventListener('click', () => {
+      if (!socket || !socket.connected) {
+        submitStatusMsgEl.textContent = '尚未連線至伺服器，無法送出 esp32-msg 指令。';
+        submitStatusMsgEl.className = 'text-xs font-mono text-red-600 font-semibold';
+        return;
+      }
+
+      const payload = getCurrentPayload();
+      socket.emit('esp32-msg', payload);
+
+      submitStatusMsgEl.textContent = `[${formatTime(new Date())}] 已送出 esp32-msg = ${JSON.stringify(payload)}，等待伺服器廣播確認...`;
+      submitStatusMsgEl.className = 'text-xs font-mono text-neutral-700';
+    });
+
+    // Init
+    initSvgCanvas();
+    renderSpeedButtons();
+    selectMode(1);
+    connectSocket(currentEnv);
+    requestAnimationFrame(animationTick);
+  </script>
+</body>
+</html>

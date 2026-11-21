@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>900MHz Server Viewer</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <script src="/socket.io/socket.io.js"></script>
+</head>
+<body class="bg-white text-neutral-900 antialiased selection:bg-neutral-900 selection:text-white">
+  <div class="min-h-screen max-w-6xl mx-auto px-4 sm:px-6 py-8">
+
+    <!-- Header -->
+    <header class="mb-6 pb-5 border-b border-neutral-200">
+      <div class="flex items-center justify-between mb-3">
+        <span class="text-[11px] font-mono uppercase tracking-[0.18em] text-neutral-400">
+          MAIN MONITOR VIEW
+        </span>
+        <a
+          href="/esp32"
+          class="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-mono font-semibold bg-neutral-900 text-white hover:bg-neutral-700 transition border border-neutral-900"
+        >
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+          <span>ESP32 特殊動態分頁 →</span>
+        </a>
+      </div>
+
+      <div class="flex flex-col items-center">
+        <div class="flex items-center gap-2 text-[11px] font-mono uppercase tracking-[0.2em] text-neutral-400 mb-1.5">
+          <span>RF TELEMETRY MONITOR</span>
+          <span>/</span>
+          <span>7-SEG HUD (A–G)</span>
+        </div>
+        <h1 class="text-center text-2xl sm:text-3xl font-bold tracking-tight text-black">
+          900MHz Server Viewer
+        </h1>
+      </div>
+
+      <!-- Compact Telemetry Status Strip -->
+      <div class="mt-5 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs font-mono">
+        <div class="border border-neutral-200 bg-neutral-50/60 px-3 py-2 flex items-center justify-between">
+          <span class="text-neutral-500">LINK</span>
+          <span id="conn-status" class="inline-flex items-center gap-1.5 font-semibold text-amber-600">
+            <span id="conn-dot" class="w-2 h-2 rounded-full bg-amber-500"></span>
+            <span id="conn-text">CONNECTING</span>
+          </span>
+        </div>
+        <div class="border border-neutral-200 bg-neutral-50/60 px-3 py-2 flex items-center justify-between">
+          <span class="text-neutral-500">EVENT</span>
+          <span class="font-semibold text-neutral-900">client_msg</span>
+        </div>
+        <div class="border border-neutral-200 bg-neutral-50/60 px-3 py-2 flex items-center justify-between">
+          <span class="text-neutral-500">BUFFER</span>
+          <span id="buffer-count" class="font-semibold tabular-nums text-neutral-900">0 / 20</span>
+        </div>
+        <div class="border border-neutral-200 bg-neutral-50/60 px-3 py-2 flex items-center justify-between">
+          <span class="text-neutral-500">ACTIVE SEG</span>
+          <span id="live-active-bits" class="font-semibold tabular-nums text-neutral-900">00 / 56</span>
+        </div>
+      </div>
+
+      <!-- Endpoint Switcher Bar -->
+      <div class="mt-3 border border-neutral-200 bg-neutral-50/40 px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
+        <div class="flex items-center gap-2 min-w-0">
+          <span class="text-neutral-500 shrink-0">ENDPOINT</span>
+          <span id="active-endpoint-url" class="text-neutral-900 font-semibold truncate"></span>
+        </div>
+        <div class="inline-flex border border-neutral-300 bg-white p-0.5 shrink-0" role="group" aria-label="Socket.IO Endpoint Switcher">
+          <button
+            id="btn-env-prod"
+            type="button"
+            class="px-2.5 py-1 text-[11px] font-mono font-semibold transition cursor-pointer"
+          >
+            PROD
+          </button>
+          <button
+            id="btn-env-local"
+            type="button"
+            class="px-2.5 py-1 text-[11px] font-mono font-semibold transition cursor-pointer"
+          >
+            LOCAL
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Live Visual Tracking HUD (8x Seven-Segment Displays) -->
+    <section class="mb-7 hud-frame border border-neutral-200 bg-white p-4 sm:p-5">
+      <div class="flex flex-wrap items-center justify-between gap-2 mb-4 pb-3 border-b border-neutral-100">
+        <div class="flex items-center gap-2.5">
+          <span class="w-1.5 h-4 bg-neutral-900 inline-block"></span>
+          <h2 class="text-xs font-mono font-semibold uppercase tracking-wider text-neutral-800">
+            7-Segment Telemetry HUD (8 Units · A B C D E F G)
+          </h2>
+          <span id="hud-mode-badge" class="text-[11px] font-mono px-2 py-0.5 border border-emerald-200 bg-emerald-50 text-emerald-700">
+            LIVE
+          </span>
+        </div>
+        <div class="flex items-center gap-3 text-xs font-mono text-neutral-500">
+          <span id="hud-timestamp" class="tabular-nums">DEFAULT STATE (0 / 56)</span>
+          <button
+            id="btn-return-live"
+            type="button"
+            class="hidden text-[11px] px-2 py-0.5 border border-neutral-300 text-neutral-700 hover:bg-neutral-100 transition cursor-pointer"
+          >
+            RETURN LIVE
+          </button>
+        </div>
+      </div>
+
+      <!-- 8 Seven-Segment Display Modules -->
+      <div id="live-seg-grid" class="grid grid-cols-4 sm:grid-cols-8 gap-2.5"></div>
+    </section>
+
+    <!-- Controls Bar above the 20-Record History Table -->
+    <section class="mb-3 flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-center gap-2.5">
+        <span class="w-1.5 h-4 bg-neutral-900 inline-block"></span>
+        <h2 class="text-sm font-mono font-semibold uppercase tracking-wider text-neutral-900">
+          client_msg History Log
+        </h2>
+        <span class="text-xs font-mono text-neutral-400">(Latest 20 Records)</span>
+      </div>
+
+      <div class="flex items-center gap-2.5">
+        <button
+          id="btn-send-test"
+          type="button"
+          class="inline-flex items-center gap-2 px-4 py-2 text-xs font-mono font-semibold tracking-wide bg-neutral-900 text-white hover:bg-neutral-700 active:bg-black transition border border-neutral-900 cursor-pointer"
+        >
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+          <span>發送測試訊息 (client_msg)</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- 20-Record History Table -->
+    <section class="hud-frame border border-neutral-200 bg-white overflow-hidden">
+      <div class="overflow-x-auto">
+        <table class="w-full text-left border-collapse">
+          <thead>
+            <tr class="border-b border-neutral-200 bg-neutral-50 text-[11px] font-mono uppercase tracking-wider text-neutral-500">
+              <th class="py-2.5 px-3 w-14">SEQ</th>
+              <th class="py-2.5 px-3 w-28">TIME</th>
+              <th class="py-2.5 px-3 w-24">ACTIVE</th>
+              <th class="py-2.5 px-3 w-72">7-SEGMENT DISPLAY (8×7)</th>
+              <th class="py-2.5 px-3">RAW DATA</th>
+            </tr>
+          </thead>
+          <tbody id="history-tbody" class="divide-y divide-neutral-100 text-xs font-mono">
+            <!-- Populated by JS -->
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Subtle Footer -->
+    <footer class="mt-5 flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono text-neutral-400">
+      <span>SEG ORDER: [A, B, C, D, E, F, G] → [1, 2, 3, 4, 5, 6, 7]</span>
+      <span id="socket-id-label">SOCKET ID: --</span>
+    </footer>
+  </div>
+
+  <script>
+    // =========================================================
+    // Socket.IO Endpoint Config (Easy switch: PROD <-> LOCAL)
+    // =========================================================
+    const isLocalHost = ['localhost', '127.0.0.1'].includes(window.location.hostname);
+    const SOCKET_ENDPOINTS = {
+      prod: 'https://900mhz-server.nosidehere.space',
+      local: isLocalHost ? window.location.origin : 'http://localhost:3000'
+    };
+
+    const ENV_STORAGE_KEY = '900mhz_socket_env';
+    let currentEnv = localStorage.getItem(ENV_STORAGE_KEY) || (isLocalHost ? 'local' : 'prod');
+    if (!SOCKET_ENDPOINTS[currentEnv]) currentEnv = 'prod';
+
+    const MAX_HISTORY = 20;
+
+    const DEFAULT_MATRIX = [
+      [0,0,0,0,0,0,0],
+      [0,0,0,0,0,0,0],
+      [0,0,0,0,0,0,0],
+      [0,0,0,0,0,0,0],
+      [0,0,0,0,0,0,0],
+      [0,0,0,0,0,0,0],
+      [0,0,0,0,0,0,0],
+      [0,0,0,0,0,0,0]
+    ];
+
+    const TEST_MATRIX = [
+      [1,0,0,0,0,0,0],
+      [0,0,0,0,0,0,1],
+      [0,0,0,1,0,0,0],
+      [1,0,0,0,0,0,0],
+      [0,0,0,0,0,0,1],
+      [0,0,0,1,0,0,0],
+      [1,0,0,0,0,0,0],
+      [0,0,0,0,0,0,1]
+    ];
+
+    // Standard 7-segment polygons in A, B, C, D, E, F, G order (index 0..6)
+    const SEG_POLYGONS = [
+      '7,5 10,2 30,2 33,5 30,8 10,8',       // 0: A (top)
+      '35,7 38,10 38,29 35,32 32,29 32,10', // 1: B (top-right)
+      '35,36 38,39 38,58 35,61 32,58 32,39',// 2: C (bottom-right)
+      '7,63 10,60 30,60 33,63 30,66 10,66', // 3: D (bottom)
+      '5,36 8,39 8,58 5,61 2,58 2,39',      // 4: E (bottom-left)
+      '5,7 8,10 8,29 5,32 2,29 2,10',       // 5: F (top-left)
+      '7,34 10,31 30,31 33,34 30,37 10,37'  // 6: G (middle)
+    ];
+
+    let socket = null;
+    let records = [];
+    let localSeq = 0;
+    let inspectedSeq = null;
+
+    const connStatusEl = document.getElementById('conn-status');
+    const connDotEl = document.getElementById('conn-dot');
+    const connTextEl = document.getElementById('conn-text');
+    const bufferCountEl = document.getElementById('buffer-count');
+    const liveActiveBitsEl = document.getElementById('live-active-bits');
+    const liveSegGridEl = document.getElementById('live-seg-grid');
+    const hudModeBadgeEl = document.getElementById('hud-mode-badge');
+    const hudTimestampEl = document.getElementById('hud-timestamp');
+    const btnReturnLive = document.getElementById('btn-return-live');
+    const historyTbodyEl = document.getElementById('history-tbody');
+    const btnSendTest = document.getElementById('btn-send-test');
+    const socketIdLabelEl = document.getElementById('socket-id-label');
+    const activeEndpointUrlEl = document.getElementById('active-endpoint-url');
+    const btnEnvProd = document.getElementById('btn-env-prod');
+    const btnEnvLocal = document.getElementById('btn-env-local');
+
+    function formatTime(isoOrDate) {
+      const d = isoOrDate instanceof Date ? isoOrDate : new Date(isoOrDate);
+      const hh = String(d.getHours()).padStart(2, '0');
+      const mm = String(d.getMinutes()).padStart(2, '0');
+      const ss = String(d.getSeconds()).padStart(2, '0');
+      const ms = String(d.getMilliseconds()).padStart(3, '0');
+      return `${hh}:${mm}:${ss}.${ms}`;
+    }
+
+    function normalizeMatrix(data) {
+      if (!Array.isArray(data) || data.length === 0) return DEFAULT_MATRIX;
+      return data;
+    }
+
+    function countActiveBits(matrix) {
+      let active = 0;
+      let total = 0;
+      for (const row of matrix) {
+        if (Array.isArray(row)) {
+          for (const val of row) {
+            total += 1;
+            if (Number(val) === 1) active += 1;
+          }
+        }
+      }
+      return { active, total: total || 56 };
+    }
+
+    function renderSevenSegSVG(bits, sizeClass) {
+      const safeBits = Array.isArray(bits) ? bits : [0,0,0,0,0,0,0];
+      const polygons = SEG_POLYGONS.map((pts, idx) => {
+        const isOn = Number(safeBits[idx]) === 1;
+        const fill = isOn ? '#059669' : '#e5e7eb';
+        return `<polygon points="${pts}" fill="${fill}" />`;
+      }).join('');
+
+      return `
+        <svg viewBox="0 0 40 68" class="${sizeClass}" aria-hidden="true">
+          ${polygons}
+        </svg>
+      `;
+    }
+
+    function renderLiveHUD(matrix, metaText, isInspected) {
+      const safeMatrix = normalizeMatrix(matrix);
+      const { active, total } = countActiveBits(safeMatrix);
+      liveActiveBitsEl.textContent = `${String(active).padStart(2, '0')} / ${total}`;
+      hudTimestampEl.textContent = metaText;
+
+      if (isInspected) {
+        hudModeBadgeEl.textContent = 'INSPECT';
+        hudModeBadgeEl.className = 'text-[11px] font-mono px-2 py-0.5 border border-neutral-300 bg-neutral-100 text-neutral-800';
+        btnReturnLive.classList.remove('hidden');
+      } else {
+        hudModeBadgeEl.textContent = 'LIVE';
+        hudModeBadgeEl.className = 'text-[11px] font-mono px-2 py-0.5 border border-emerald-200 bg-emerald-50 text-emerald-700';
+        btnReturnLive.classList.add('hidden');
+      }
+
+      liveSegGridEl.innerHTML = safeMatrix.map((digitBits, idx) => {
+        const safeBits = Array.isArray(digitBits) ? digitBits : [0,0,0,0,0,0,0];
+        const bitSpans = safeBits.map((v) =>
+          Number(v) === 1
+            ? '<span class="text-emerald-700 font-bold">1</span>'
+            : '<span class="text-neutral-300">0</span>'
+        ).join('');
+
+        return `
+          <div class="border border-neutral-200 bg-neutral-50/50 px-2 py-2.5 flex flex-col items-center">
+            <div class="w-full flex items-center justify-between text-[10px] font-mono text-neutral-400 mb-2 pb-1 border-b border-neutral-100">
+              <span class="font-semibold text-neutral-600">D${idx + 1}</span>
+              <span>A–G</span>
+            </div>
+            ${renderSevenSegSVG(safeBits, 'w-10 h-[68px]')}
+            <div class="mt-2 text-[10px] font-mono tracking-widest tabular-nums">
+              ${bitSpans}
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderRowSevenSegStrip(matrix) {
+      return `
+        <div class="inline-flex items-center gap-1.5 bg-neutral-50 border border-neutral-200 px-2 py-1.5">
+          ${matrix.map((digitBits) => renderSevenSegSVG(digitBits, 'w-5 h-[34px] shrink-0')).join('')}
+        </div>
+      `;
+    }
+
+    function renderRawHighlighted(matrix) {
+      const formattedRows = matrix.map((row) => {
+        if (!Array.isArray(row)) return '[]';
+        const cells = row.map((v) =>
+          Number(v) === 1
+            ? '<span class="text-emerald-700 font-bold">1</span>'
+            : '<span class="text-neutral-400">0</span>'
+        ).join(',');
+        return `[${cells}]`;
+      });
+      return `[${formattedRows.join(', ')}]`;
+    }
+
+    function renderHistoryTable(flashFirst = false) {
+      bufferCountEl.textContent = `${records.length} / ${MAX_HISTORY}`;
+
+      if (records.length === 0) {
+        historyTbodyEl.innerHTML = `
+          <tr>
+            <td colspan="5" class="py-10 px-4 text-center text-neutral-400">
+              <div class="mb-2 text-neutral-600 font-semibold">尚無 client_msg 歷史資料</div>
+              <div class="text-[11px]">
+                預設格式：${JSON.stringify(DEFAULT_MATRIX)}
+              </div>
+              <div class="mt-1 text-[11px]">點擊上方「發送測試訊息 (client_msg)」按鈕以驗證即時收發</div>
+            </td>
+          </tr>
+        `;
+        renderLiveHUD(DEFAULT_MATRIX, 'DEFAULT STATE (0 / 56)', false);
+        return;
+      }
+
+      historyTbodyEl.innerHTML = records.map((rec, idx) => {
+        const { active, total } = countActiveBits(rec.data);
+        const pct = Math.round((active / total) * 100);
+        const isSelected = inspectedSeq === rec.seq;
+        const rowHighlight = isSelected
+          ? 'bg-neutral-100/90'
+          : (idx === 0 && flashFirst ? 'row-flash hover:bg-neutral-50' : 'hover:bg-neutral-50');
+
+        return `
+          <tr
+            data-seq="${rec.seq}"
+            class="cursor-pointer transition-colors ${rowHighlight}"
+            title="點擊於上方 HUD 檢視此筆資料"
+          >
+            <td class="py-2.5 px-3 tabular-nums text-neutral-500 font-semibold">
+              #${String(rec.seq).padStart(3, '0')}
+            </td>
+            <td class="py-2.5 px-3 tabular-nums text-neutral-700 whitespace-nowrap">
+              ${formatTime(rec.timestamp)}
+            </td>
+            <td class="py-2.5 px-3 whitespace-nowrap">
+              <div class="flex items-center gap-2">
+                <span class="tabular-nums font-semibold ${active > 0 ? 'text-neutral-900' : 'text-neutral-400'}">
+                  ${String(active).padStart(2, '0')}/${total}
+                </span>
+                <div class="w-8 h-1.5 bg-neutral-100 border border-neutral-200 overflow-hidden">
+                  <div class="h-full bg-emerald-600" style="width: ${pct}%"></div>
+                </div>
+              </div>
+            </td>
+            <td class="py-2.5 px-3 whitespace-nowrap">
+              ${renderRowSevenSegStrip(rec.data)}
+            </td>
+            <td class="py-2.5 px-3 text-[11px] leading-relaxed break-all text-neutral-600">
+              ${renderRawHighlighted(rec.data)}
+            </td>
+          </tr>
+        `;
+      }).join('');
+
+      historyTbodyEl.querySelectorAll('tr[data-seq]').forEach((tr) => {
+        tr.addEventListener('click', () => {
+          const seq = Number(tr.getAttribute('data-seq'));
+          const found = records.find((r) => r.seq === seq);
+          if (!found) return;
+          inspectedSeq = seq;
+          renderLiveHUD(found.data, `SEQ #${String(found.seq).padStart(3, '0')} · ${formatTime(found.timestamp)}`, true);
+          renderHistoryTable(false);
+        });
+      });
+
+      if (inspectedSeq === null) {
+        const latest = records[0];
+        renderLiveHUD(latest.data, `SEQ #${String(latest.seq).padStart(3, '0')} · ${formatTime(latest.timestamp)}`, false);
+      }
+    }
+
+    function updateEndpointUI() {
+      const targetUrl = SOCKET_ENDPOINTS[currentEnv];
+      activeEndpointUrlEl.textContent = targetUrl;
+
+      const activeBtnClass = 'px-2.5 py-1 text-[11px] font-mono font-semibold bg-neutral-900 text-white transition cursor-pointer';
+      const inactiveBtnClass = 'px-2.5 py-1 text-[11px] font-mono font-semibold text-neutral-500 hover:text-neutral-900 transition cursor-pointer';
+
+      btnEnvProd.className = currentEnv === 'prod' ? activeBtnClass : inactiveBtnClass;
+      btnEnvLocal.className = currentEnv === 'local' ? activeBtnClass : inactiveBtnClass;
+    }
+
+    function setConnectionState(state, socketId = '--') {
+      if (state === 'online') {
+        connStatusEl.className = 'inline-flex items-center gap-1.5 font-semibold text-emerald-700';
+        connDotEl.className = 'w-2 h-2 rounded-full bg-emerald-500 animate-pulse';
+        connTextEl.textContent = 'ONLINE';
+        socketIdLabelEl.textContent = `SOCKET ID: ${socketId}`;
+      } else if (state === 'connecting') {
+        connStatusEl.className = 'inline-flex items-center gap-1.5 font-semibold text-amber-600';
+        connDotEl.className = 'w-2 h-2 rounded-full bg-amber-500';
+        connTextEl.textContent = 'CONNECTING';
+        socketIdLabelEl.textContent = 'SOCKET ID: --';
+      } else {
+        connStatusEl.className = 'inline-flex items-center gap-1.5 font-semibold text-red-600';
+        connDotEl.className = 'w-2 h-2 rounded-full bg-red-500';
+        connTextEl.textContent = 'OFFLINE';
+        socketIdLabelEl.textContent = 'SOCKET ID: --';
+      }
+    }
+
+    function connectSocket(env) {
+      currentEnv = env;
+      localStorage.setItem(ENV_STORAGE_KEY, env);
+      updateEndpointUI();
+      setConnectionState('connecting');
+
+      if (socket) {
+        socket.removeAllListeners();
+        socket.disconnect();
+      }
+
+      records = [];
+      localSeq = 0;
+      inspectedSeq = null;
+      renderHistoryTable(false);
+
+      const targetUrl = SOCKET_ENDPOINTS[env];
+      socket = io(targetUrl, {
+        transports: ['websocket', 'polling']
+      });
+
+      socket.on('connect', () => {
+        setConnectionState('online', socket.id);
+      });
+
+      socket.on('disconnect', () => {
+        setConnectionState('offline');
+      });
+
+      socket.on('connect_error', () => {
+        setConnectionState('offline');
+      });
+
+      socket.on('history_init', (serverHistory) => {
+        if (Array.isArray(serverHistory) && serverHistory.length > 0) {
+          records = serverHistory.slice(0, MAX_HISTORY);
+          localSeq = records[0].seq || records.length;
+          renderHistoryTable(false);
+        }
+      });
+
+      socket.on('client_msg', (data) => {
+        localSeq += 1;
+        const newRecord = {
+          seq: localSeq,
+          timestamp: new Date().toISOString(),
+          data: normalizeMatrix(data)
+        };
+
+        records.unshift(newRecord);
+        if (records.length > MAX_HISTORY) {
+          records.length = MAX_HISTORY;
+        }
+
+        if (inspectedSeq !== null && !records.some((r) => r.seq === inspectedSeq)) {
+          inspectedSeq = null;
+        }
+
+        renderHistoryTable(true);
+      });
+    }
+
+    btnReturnLive.addEventListener('click', () => {
+      inspectedSeq = null;
+      renderHistoryTable(false);
+    });
+
+    btnEnvProd.addEventListener('click', () => {
+      if (currentEnv !== 'prod') connectSocket('prod');
+    });
+
+    btnEnvLocal.addEventListener('click', () => {
+      if (currentEnv !== 'local') connectSocket('local');
+    });
+
+    btnSendTest.addEventListener('click', () => {
+      if (socket) {
+        socket.emit('client_msg', TEST_MATRIX);
+      }
+    });
+
+    // Initial connection
+    connectSocket(currentEnv);
+  </script>
+</body>
+</html>

@@ -1,0 +1,6 @@
+# 900MHz-Server local ignores (aligned with root .gitignore, no conflicting rules)
+node_modules/
+.env*
+*.zip
+*.log
+.DS_Store

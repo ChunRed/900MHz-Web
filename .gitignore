@@ -40,3 +40,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# 900MHz-Server (nested server package)
+900MHz-Server/node_modules/
+900MHz-Server/*.zip
+900MHz-Server/.env*
