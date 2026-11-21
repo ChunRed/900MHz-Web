@@ -54,7 +54,6 @@ export default function MainSevenSegmentBubble({
     const segSlotHeight = lerp(baseBoxHeight, 114, sendExpandT);
     const segScale = lerp(1, 1.38, sendExpandT);
     const revealT = Math.max(0, Math.min(1, (sendExpandT - 0.18) / 0.82));
-    const serializedMatrix = JSON.stringify(segmentMatrix);
 
     return (
       <div
@@ -143,24 +142,16 @@ export default function MainSevenSegmentBubble({
             </div>
           </div>
 
-          {/* 下方展開區：陣列數據與 ESC 關閉按鈕 */}
+          {/* 下方展開區：ESC 關閉按鈕 */}
           <div
             style={{
-              maxHeight: `${sendExpandT * 240}px`,
-              marginTop: `${sendExpandT * 10}px`,
+              maxHeight: `${sendExpandT * 80}px`,
+              marginTop: `${sendExpandT * 20}px`,
               opacity: revealT,
             }}
             className="overflow-hidden"
           >
-            <div className="border border-zinc-800/80 bg-black/60 p-2.5 font-mono text-[10px] leading-relaxed break-all text-zinc-400 select-all">
-              <div className="mb-1 flex items-center justify-between border-b border-zinc-900 pb-1 text-[9px] text-zinc-600">
-                <span>ARRAY // [A,B,C,D,E,F,G]</span>
-                <span>8×7 BIT</span>
-              </div>
-              {serializedMatrix}
-            </div>
-
-            <div className="mt-5 flex justify-center">
+            <div className="flex justify-center">
               <button
                 type="button"
                 disabled={!canCloseSend}

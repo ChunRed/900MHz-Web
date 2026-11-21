@@ -23,7 +23,6 @@ export default function SendResultModal({
   const isEmpty = segmentMatrix.every((digit) =>
     digit.every((seg) => seg === 0)
   );
-  const serializedMatrix = JSON.stringify(segmentMatrix);
 
   return (
     <div
@@ -126,15 +125,6 @@ export default function SendResultModal({
                 digitClassName="h-16 w-8 sm:h-20 sm:w-10"
                 gapClassName="gap-2 sm:gap-2.5"
               />
-            </div>
-
-            {/* 陣列數字顯示在八個 2D 小七段顯示器圖示下方 */}
-            <div className="mt-2.5 border border-zinc-800/80 bg-black/60 p-2.5 font-mono text-[10px] leading-relaxed break-all text-zinc-400 select-all">
-              <div className="mb-1 flex items-center justify-between border-b border-zinc-900 pb-1 text-[9px] text-zinc-600">
-                <span>ARRAY // [A,B,C,D,E,F,G]</span>
-                <span>8×7 BIT</span>
-              </div>
-              {serializedMatrix}
             </div>
           </>
         )}

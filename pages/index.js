@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import Head from "next/head";
+import { io } from "socket.io-client";
 import TelephoneCanvas from "@/components/scene/TelephoneCanvas";
 import HeaderTitle from "@/components/ui/HeaderTitle";
 import BackButton from "@/components/ui/BackButton";
@@ -15,6 +16,8 @@ import MainSevenSegmentBubble from "@/components/ui/MainSevenSegmentBubble";
 import OnboardingGuideModal from "@/components/ui/OnboardingGuideModal";
 import AuthorInfoButton from "@/components/ui/AuthorInfoButton";
 import DatasheetOverlay from "@/components/ui/DatasheetOverlay";
+import MobileOnlyNotice from "@/components/ui/MobileOnlyNotice";
+import IncomingMessageBubble from "@/components/ui/IncomingMessageBubble";
 import { MOSAIC_DEFAULTS } from "@/components/shaders/mosaicNumericShader";
 import {
   BIG_SEGMENT_ACTIVE_STYLE,
@@ -25,6 +28,14 @@ import {
 const createEmptySegmentMatrix = () =>
   Array.from({ length: SMALL_DIGIT_COUNT }, () => Array(7).fill(0));
 
+const normalizeSegmentMatrix = (data) => {
+  if (!Array.isArray(data)) return null;
+  return Array.from({ length: SMALL_DIGIT_COUNT }, (_, digitIdx) => {
+    const row = Array.isArray(data[digitIdx]) ? data[digitIdx] : [];
+    return Array.from({ length: 7 }, (_, segIdx) => (row[segIdx] ? 1 : 0));
+  });
+};
+
 const smoothStep = (edge0, edge1, x) => {
   const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
   return t * t * (3 - 2 * t);
@@ -33,6 +44,31 @@ const smoothStep = (edge0, edge1, x) => {
 const DATASHEET_TRANSITION_MS = 1350;
 const SEND_ENTER_MS = 2850;
 const SEND_EXIT_MS = 1150;
+const SOCKET_URL =
+  process.env.NEXT_PUBLIC_SOCKET_URL || "https://900mhz-server.nosidehere.space";
+
+const checkIsMobilePhone = () => {
+  if (typeof window === "undefined" || typeof navigator === "undefined") {
+    return false;
+  }
+  const ua = navigator.userAgent || "";
+  const isTabletUA =
+    /iPad|Tablet|PlayBook|Silk/i.test(ua) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  if (isTabletUA) return false;
+
+  const isPhoneUA =
+    /Android.*Mobile|iPhone|iPod|BlackBerry|IEMobile|Opera Mini|Windows Phone|Mobile Safari/i.test(
+      ua
+    );
+  if (isPhoneUA) return true;
+
+  return (
+    window.innerWidth <= 768 &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(pointer: coarse)").matches
+  );
+};
 
 export default function Home() {
   const resetViewRef = useRef(null);
@@ -40,6 +76,16 @@ export default function Home() {
   const mainLightRef = useRef(null);
   const datasheetRafRef = useRef(null);
   const sendRafRef = useRef(null);
+  const socketRef = useRef(null);
+  const lastSelfSentRef = useRef(null);
+
+  // 裝置檢測：null=尚未檢測、true=手機載體、false=非手機載體（顯示提示並鎖定）
+  const [isMobileDevice, setIsMobileDevice] = useState(null);
+  // 監聽 socket.io client_msg 收到的其他使用者新訊息
+  const [incomingMessage, setIncomingMessage] = useState({
+    matrix: null,
+    seq: 0,
+  });
 
   // 初始畫面預設為夜間模式，並顯示初始操作說明視窗
   const [isDarkMode, setIsDarkMode] = useState(true);
@@ -161,6 +207,19 @@ export default function Home() {
       setIsSendModalOpen(true);
       return;
     }
+
+    // 透過 Socket.IO 將 8x7 陣列數值傳送給 server（event 名稱：client_msg）
+    lastSelfSentRef.current = {
+      payload: JSON.stringify(segmentMatrix),
+      time: Date.now(),
+    };
+    if (socketRef.current) {
+      if (!socketRef.current.connected) {
+        socketRef.current.connect();
+      }
+      socketRef.current.emit("client_msg", segmentMatrix);
+    }
+
     runSendTransition(1);
   };
 
@@ -171,6 +230,55 @@ export default function Home() {
       runSendTransition(0);
     }
   };
+
+  useEffect(() => {
+    const updateDeviceType = () => {
+      setIsMobileDevice(checkIsMobilePhone());
+    };
+    updateDeviceType();
+    window.addEventListener("resize", updateDeviceType);
+    return () => {
+      window.removeEventListener("resize", updateDeviceType);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (isMobileDevice !== true) return undefined;
+
+    const socket = io(SOCKET_URL, {
+      transports: ["websocket", "polling"],
+    });
+    socketRef.current = socket;
+
+    const handleClientMsg = (data) => {
+      const normalized = normalizeSegmentMatrix(data);
+      if (!normalized) return;
+
+      const serialized = JSON.stringify(normalized);
+      const lastSelf = lastSelfSentRef.current;
+      if (
+        lastSelf &&
+        lastSelf.payload === serialized &&
+        Date.now() - lastSelf.time < 2500
+      ) {
+        lastSelfSentRef.current = null;
+        return;
+      }
+
+      setIncomingMessage((prev) => ({
+        matrix: normalized,
+        seq: prev.seq + 1,
+      }));
+    };
+
+    socket.on("client_msg", handleClientMsg);
+
+    return () => {
+      socket.off("client_msg", handleClientMsg);
+      socket.disconnect();
+      socketRef.current = null;
+    };
+  }, [isMobileDevice]);
 
   useEffect(() => {
     return () => {
@@ -283,6 +391,34 @@ export default function Home() {
       bubbleTip: activeBubbleTip,
     };
   })();
+
+  if (isMobileDevice === null) {
+    return (
+      <>
+        <Head>
+          <title>900MHz</title>
+          <meta name="viewport" content="width=device-width, initial-scale=1" />
+          <meta name="theme-color" content="#000000" />
+        </Head>
+        <main className="relative w-screen h-screen overflow-hidden bg-black" />
+      </>
+    );
+  }
+
+  if (!isMobileDevice) {
+    return (
+      <>
+        <Head>
+          <title>900MHz</title>
+          <meta name="viewport" content="width=device-width, initial-scale=1" />
+          <meta name="theme-color" content="#000000" />
+        </Head>
+        <main className="relative w-screen h-screen overflow-hidden bg-black">
+          <MobileOnlyNotice />
+        </main>
+      </>
+    );
+  }
 
   return (
     <>
@@ -425,6 +561,20 @@ export default function Home() {
           isDarkMode={isDarkMode}
           onClickLeft={handleSelectPrevDigit}
           onClickRight={handleSelectNextDigit}
+        />
+
+        {/* 主畫面下方接收其他使用者新訊息的對話框（監聽 socket.io client_msg） */}
+        <IncomingMessageBubble
+          messageMatrix={incomingMessage.matrix}
+          messageSeq={incomingMessage.seq}
+          frameData={projectionFrameData}
+          visible={!isFocused}
+          isFadingOut={isFrameFadingOut}
+          isDarkMode={isDarkMode}
+          hudOpacity={Math.min(hudOpacity, sendHudOpacity)}
+          onDismiss={() =>
+            setIncomingMessage((prev) => ({ ...prev, matrix: null }))
+          }
         />
 
         {/* 右下角作者 / 資訊按鈕（點擊進入 Datasheet 頁面轉場） */}
