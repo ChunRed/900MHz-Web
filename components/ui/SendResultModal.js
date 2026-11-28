@@ -5,6 +5,7 @@ export default function SendResultModal({
   visible,
   segmentMatrix,
   noticeType = "empty",
+  noticeMessage = "",
   cooldownSec = 0,
   isDarkMode,
   onClose,
@@ -26,7 +27,10 @@ export default function SendResultModal({
     digit.every((seg) => seg === 0)
   );
   const showWarning =
-    noticeType === "duplicate" || noticeType === "cooldown" || isEmpty;
+    noticeType === "duplicate" ||
+    noticeType === "cooldown" ||
+    noticeType === "error" ||
+    isEmpty;
 
   const warningMeta =
     noticeType === "duplicate"
@@ -42,6 +46,13 @@ export default function SendResultModal({
           tag: "COOLDOWN",
           message: `傳送冷卻中，請於 ${cooldownSec} 秒後再試`,
           sub: "TRANSMISSION COOLDOWN IN PROGRESS",
+        }
+      : noticeType === "error"
+      ? {
+          badge: "SEC // ERR",
+          tag: "REJECTED",
+          message: noticeMessage || "安全驗證未通過或伺服器忙碌中，請稍後再試",
+          sub: "TRANSMISSION BLOCKED BY SECURITY GATE",
         }
       : {
           badge: "ERR // 00",

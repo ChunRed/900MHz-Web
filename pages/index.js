@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Head from "next/head";
+import Script from "next/script";
 import { io } from "socket.io-client";
 import TelephoneCanvas from "@/components/scene/TelephoneCanvas";
 import HeaderTitle from "@/components/ui/HeaderTitle";
@@ -50,6 +51,7 @@ const LAST_SEND_AT_KEY = "900mhz_last_send_at";
 const LAST_SEND_RECORD_KEY = "900mhz_last_send_record";
 const SOCKET_URL =
   process.env.NEXT_PUBLIC_SOCKET_URL || "https://900mhz-server.nosidehere.space";
+const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || "";
 
 const checkIsMobilePhone = () => {
   if (typeof window === "undefined" || typeof navigator === "undefined") {
@@ -83,6 +85,9 @@ export default function Home() {
   const sendRafRef = useRef(null);
   const socketRef = useRef(null);
   const lastSelfSentRef = useRef(null);
+  const turnstileContainerRef = useRef(null);
+  const turnstileWidgetIdRef = useRef(null);
+  const turnstilePendingRef = useRef(null);
 
   // 裝置檢測：null=尚未檢測、true=手機載體、false=非手機載體（顯示提示並鎖定）
   const [isMobileDevice, setIsMobileDevice] = useState(null);
@@ -91,10 +96,12 @@ export default function Home() {
     matrix: null,
     seq: 0,
   });
-  // 送出冷卻時間倒數（秒）與通知彈窗類型
+  // 送出冷卻時間倒數（秒）、通知彈窗類型與 API 傳送狀態
   const [cooldownUntil, setCooldownUntil] = useState(0);
   const [cooldownRemainingSec, setCooldownRemainingSec] = useState(0);
   const [sendNoticeType, setSendNoticeType] = useState("empty");
+  const [sendNoticeMessage, setSendNoticeMessage] = useState("");
+  const [isSubmittingSend, setIsSubmittingSend] = useState(false);
 
   // 初始畫面預設為夜間模式，並顯示初始操作說明視窗
   const [isDarkMode, setIsDarkMode] = useState(true);
@@ -199,8 +206,85 @@ export default function Home() {
     sendRafRef.current = requestAnimationFrame(step);
   };
 
-  const handleClickSend = () => {
+  // 初始化 Cloudflare Turnstile 隱形人機驗證元件
+  const initTurnstileWidget = useCallback(() => {
     if (
+      !TURNSTILE_SITE_KEY ||
+      typeof window === "undefined" ||
+      !window.turnstile ||
+      !turnstileContainerRef.current ||
+      turnstileWidgetIdRef.current !== null
+    ) {
+      return;
+    }
+
+    turnstileWidgetIdRef.current = window.turnstile.render(
+      turnstileContainerRef.current,
+      {
+        sitekey: TURNSTILE_SITE_KEY,
+        appearance: "interaction-only",
+        execution: "execute",
+        callback: (token) => {
+          const pending = turnstilePendingRef.current;
+          if (pending) {
+            clearTimeout(pending.timer);
+            turnstilePendingRef.current = null;
+            pending.resolve(token);
+          }
+        },
+        "error-callback": () => {
+          const pending = turnstilePendingRef.current;
+          if (pending) {
+            clearTimeout(pending.timer);
+            turnstilePendingRef.current = null;
+            pending.reject(new Error("人機安全驗證失敗，請稍候再試"));
+          }
+        },
+        "expired-callback": () => {
+          if (window.turnstile && turnstileWidgetIdRef.current !== null) {
+            window.turnstile.reset(turnstileWidgetIdRef.current);
+          }
+        },
+      }
+    );
+  }, []);
+
+  const requestTurnstileToken = useCallback(() => {
+    if (!TURNSTILE_SITE_KEY) {
+      return Promise.resolve("");
+    }
+    if (typeof window === "undefined" || !window.turnstile) {
+      return Promise.reject(new Error("安全驗證元件尚未載入完成，請稍候 1 秒再按傳送"));
+    }
+    if (turnstileWidgetIdRef.current === null) {
+      initTurnstileWidget();
+    }
+    const widgetId = turnstileWidgetIdRef.current;
+    if (widgetId === null) {
+      return Promise.reject(new Error("無法初始化安全驗證元件，請重新整理頁面"));
+    }
+
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        turnstilePendingRef.current = null;
+        reject(new Error("安全驗證逾時，請再試一次"));
+      }, 8000);
+
+      turnstilePendingRef.current = { resolve, reject, timer };
+      try {
+        window.turnstile.reset(widgetId);
+        window.turnstile.execute(widgetId);
+      } catch {
+        clearTimeout(timer);
+        turnstilePendingRef.current = null;
+        reject(new Error("安全驗證啟動失敗，請重新整理頁面"));
+      }
+    });
+  }, [initTurnstileWidget]);
+
+  const handleClickSend = async () => {
+    if (
+      isSubmittingSend ||
       isTransitioningSend ||
       isTransitioningDatasheet ||
       datasheetProgress > 0.01 ||
@@ -213,6 +297,7 @@ export default function Home() {
       digit.every((seg) => seg === 0)
     );
     if (isEmpty) {
+      setSendNoticeMessage("");
       setSendNoticeType("empty");
       setIsSendModalOpen(true);
       return;
@@ -222,6 +307,7 @@ export default function Home() {
     // 單次送出冷卻時間檢查（15 秒）
     if (cooldownUntil > now) {
       setCooldownRemainingSec(Math.ceil((cooldownUntil - now) / 1000));
+      setSendNoticeMessage("");
       setSendNoticeType("cooldown");
       setIsSendModalOpen(true);
       return;
@@ -238,6 +324,7 @@ export default function Home() {
           typeof parsed.time === "number" &&
           now - parsed.time < DUPLICATE_BLOCK_MS
         ) {
+          setSendNoticeMessage("");
           setSendNoticeType("duplicate");
           setIsSendModalOpen(true);
           return;
@@ -247,32 +334,60 @@ export default function Home() {
       // 忽略 localStorage 讀取異常
     }
 
-    const nextCooldownUntil = now + SEND_COOLDOWN_MS;
-    setCooldownUntil(nextCooldownUntil);
-    setCooldownRemainingSec(Math.ceil(SEND_COOLDOWN_MS / 1000));
+    setIsSubmittingSend(true);
     try {
-      window.localStorage.setItem(LAST_SEND_AT_KEY, String(now));
-      window.localStorage.setItem(
-        LAST_SEND_RECORD_KEY,
-        JSON.stringify({ payload, time: now })
-      );
-    } catch {
-      // 忽略 localStorage 寫入異常
-    }
+      // 1. 取得一次性 Cloudflare Turnstile 隱形驗證 Token
+      const turnstileToken = await requestTurnstileToken();
 
-    // 透過 Socket.IO 將 8x7 陣列數值傳送給 server（event 名稱：client_msg）
-    lastSelfSentRef.current = {
-      payload,
-      time: now,
-    };
-    if (socketRef.current) {
-      if (!socketRef.current.connected) {
-        socketRef.current.connect();
+      // 預先記錄自身送出內容以過濾即將收到的廣播回音
+      lastSelfSentRef.current = {
+        payload,
+        time: Date.now(),
+      };
+
+      // 2. 透過 Vercel 安全代理 POST /api/send（由伺服器端帶密鑰轉發至 AWS EB）
+      const res = await fetch("/api/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          matrix: segmentMatrix,
+          turnstileToken,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.ok) {
+        lastSelfSentRef.current = null;
+        setSendNoticeMessage(data.error || "傳送失敗，請稍候再試");
+        setSendNoticeType("error");
+        setIsSendModalOpen(true);
+        return;
       }
-      socketRef.current.emit("client_msg", segmentMatrix);
-    }
 
-    runSendTransition(1);
+      // 3. 驗證與轉發成功後啟動 15 秒冷卻並播放發送動畫
+      const sentAt = Date.now();
+      const nextCooldownUntil = sentAt + SEND_COOLDOWN_MS;
+      setCooldownUntil(nextCooldownUntil);
+      setCooldownRemainingSec(Math.ceil(SEND_COOLDOWN_MS / 1000));
+      try {
+        window.localStorage.setItem(LAST_SEND_AT_KEY, String(sentAt));
+        window.localStorage.setItem(
+          LAST_SEND_RECORD_KEY,
+          JSON.stringify({ payload, time: sentAt })
+        );
+      } catch {
+        // 忽略 localStorage 寫入異常
+      }
+
+      runSendTransition(1);
+    } catch (err) {
+      lastSelfSentRef.current = null;
+      setSendNoticeMessage(err?.message || "安全驗證或網路連線異常，請稍後再試");
+      setSendNoticeType("error");
+      setIsSendModalOpen(true);
+    } finally {
+      setIsSubmittingSend(false);
+    }
   };
 
   const handleCloseSendModal = () => {
@@ -338,8 +453,12 @@ export default function Home() {
   useEffect(() => {
     if (isMobileDevice !== true) return undefined;
 
+    // 唯讀監聽用 Socket.IO（採指數退避重連，避免大量客戶端同時重連造成雪崩）
     const socket = io(SOCKET_URL, {
       transports: ["websocket", "polling"],
+      reconnectionDelay: 2000,
+      reconnectionDelayMax: 30000,
+      randomizationFactor: 0.5,
     });
     socketRef.current = socket;
 
@@ -696,7 +815,10 @@ export default function Home() {
           isDatasheetButtonBack={isDatasheetButtonBack}
           isDatasheetView={datasheetProgress >= 0.4}
           isTransitioning={
-            isTransitioningDatasheet || isTransitioningSend || isSendActive
+            isSubmittingSend ||
+            isTransitioningDatasheet ||
+            isTransitioningSend ||
+            isSendActive
           }
           cooldownSec={cooldownRemainingSec}
           hudOpacity={sendHudOpacity}
@@ -712,11 +834,27 @@ export default function Home() {
           onSend={handleClickSend}
         />
 
-        {/* 傳送內容通知彈窗（未輸入、冷卻中或重複內容提示） */}
+        {/* Cloudflare Turnstile 隱形人機驗證掛載容器 */}
+        {TURNSTILE_SITE_KEY && (
+          <>
+            <Script
+              src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"
+              strategy="afterInteractive"
+              onLoad={initTurnstileWidget}
+            />
+            <div
+              ref={turnstileContainerRef}
+              className="fixed bottom-0 left-0 z-50"
+            />
+          </>
+        )}
+
+        {/* 傳送內容通知彈窗（未輸入、冷卻中、重複內容或安全驗證拒絕提示） */}
         <SendResultModal
           visible={isSendModalOpen}
           segmentMatrix={segmentMatrix}
           noticeType={sendNoticeType}
+          noticeMessage={sendNoticeMessage}
           cooldownSec={cooldownRemainingSec}
           isDarkMode={isDarkMode}
           onClose={handleCloseSendModal}

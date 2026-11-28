@@ -21,16 +21,25 @@
           <span>←</span>
           <span>返回監看主頁</span>
         </a>
-        <span class="text-[11px] font-mono uppercase tracking-[0.18em] text-neutral-400">
-          ESP32 ANIMATION CONTROLLER
-        </span>
+        <div class="flex items-center gap-2">
+          <span class="text-[11px] font-mono uppercase tracking-[0.18em] text-neutral-400">
+            ESP32 ANIMATION CONTROLLER
+          </span>
+          <button
+            id="btn-admin-logout"
+            type="button"
+            class="hidden px-2.5 py-1 text-[11px] font-mono font-semibold border border-red-300 text-red-600 hover:bg-red-50 transition cursor-pointer"
+          >
+            鎖定控制台
+          </button>
+        </div>
       </div>
 
       <div class="flex flex-col items-center">
         <div class="flex items-center gap-2 text-[11px] font-mono uppercase tracking-[0.2em] text-neutral-400 mb-1.5">
           <span>900MHz SERVER VIEWER</span>
           <span>/</span>
-          <span>EVENT: esp32-msg [1, MODE, SPEED]</span>
+          <span>EVENT: esp32-msg [MODE, 8×7, SPEED]</span>
         </div>
         <h1 class="text-center text-2xl sm:text-3xl font-bold tracking-tight text-black">
           ESP32 特殊動態控制台
@@ -211,11 +220,11 @@
           <div class="flex items-center gap-2 text-xs font-mono">
             <span class="text-neutral-500">READY TO EMIT:</span>
             <span id="submit-payload-preview" class="font-bold text-neutral-900 bg-white border border-neutral-300 px-2 py-0.5 tabular-nums">
-              esp32-msg → [1, 1, 1]
+              esp32-msg → [1, 8×7(0), 1]
             </span>
           </div>
           <p id="submit-status-msg" class="text-xs font-mono text-neutral-500">
-            選擇動態與速度預覽確認後，按下右側送出按鍵即可發送 [1, mode, speed] 指令給伺服器與實體 ESP32。
+            選擇動態與速度預覽確認後，按下右側送出按鍵即可發送 [mode, 8×7(全0), speed] 指令給伺服器與實體 ESP32。
           </p>
         </div>
 
@@ -225,7 +234,7 @@
           class="w-full sm:w-auto inline-flex items-center justify-center gap-2.5 px-6 py-3 text-xs font-mono font-bold tracking-wider uppercase bg-neutral-900 text-white hover:bg-neutral-700 active:bg-black transition border border-neutral-900 cursor-pointer shrink-0"
         >
           <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
-          <span id="btn-emit-label">送出指令 [1, 1, 1]</span>
+          <span id="btn-emit-label">送出指令 [1, 8×7(0), 1]</span>
         </button>
       </div>
     </section>
@@ -235,6 +244,62 @@
       <span>2D LUT: DIGIT_PITCH=1.35 · SEG[A..G] → (rx, ry)</span>
       <span id="socket-id-label">SOCKET ID: --</span>
     </footer>
+  </div>
+
+  <!-- Admin Password Lock Modal -->
+  <div
+    id="admin-lock-overlay"
+    class="fixed inset-0 z-50 flex items-center justify-center bg-neutral-950/85 backdrop-blur-md px-4"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="admin-lock-title"
+  >
+    <form
+      id="admin-login-form"
+      class="w-full max-w-sm border border-neutral-700 bg-neutral-950 text-neutral-100 p-6 shadow-2xl font-mono"
+    >
+      <div class="flex items-center justify-between border-b border-neutral-800 pb-3 mb-4">
+        <div class="flex items-center gap-2">
+          <span class="bg-white text-black px-1.5 py-0.5 text-[10px] font-bold">LOCK</span>
+          <h2 id="admin-lock-title" class="text-sm font-bold tracking-wider">ESP32 控制台驗證</h2>
+        </div>
+        <span id="lock-env-badge" class="text-[10px] text-neutral-400 uppercase">PROD</span>
+      </div>
+
+      <p class="text-xs text-neutral-400 leading-relaxed mb-4">
+        此控制台可直接控制現場實體燈箱，請輸入管理員密碼解鎖。
+      </p>
+
+      <label for="admin-password-input" class="block text-[10px] uppercase tracking-widest text-neutral-400 mb-1.5">
+        ADMIN PASSWORD
+      </label>
+      <input
+        id="admin-password-input"
+        type="password"
+        autocomplete="current-password"
+        required
+        placeholder="請輸入管理員密碼"
+        class="w-full border border-neutral-700 bg-black px-3 py-2 text-xs text-white focus:border-white focus:outline-none mb-2"
+      />
+
+      <p id="admin-login-error" class="min-h-[18px] text-[11px] text-red-400 mb-3"></p>
+
+      <div class="flex items-center justify-between gap-2">
+        <a
+          href="/"
+          class="px-3 py-2 text-[11px] border border-neutral-700 text-neutral-300 hover:bg-neutral-900 transition"
+        >
+          返回主頁
+        </a>
+        <button
+          id="btn-admin-unlock"
+          type="submit"
+          class="flex-1 bg-white text-black px-4 py-2 text-xs font-bold tracking-wider hover:bg-neutral-200 transition cursor-pointer"
+        >
+          驗證並解鎖
+        </button>
+      </div>
+    </form>
   </div>
 
   <script>
@@ -310,6 +375,16 @@
     const submitStatusMsgEl = document.getElementById('submit-status-msg');
     const btnEmitEsp32 = document.getElementById('btn-emit-esp32');
     const btnEmitLabelEl = document.getElementById('btn-emit-label');
+    const adminLockOverlayEl = document.getElementById('admin-lock-overlay');
+    const adminLoginFormEl = document.getElementById('admin-login-form');
+    const adminPasswordInputEl = document.getElementById('admin-password-input');
+    const adminLoginErrorEl = document.getElementById('admin-login-error');
+    const btnAdminUnlockEl = document.getElementById('btn-admin-unlock');
+    const btnAdminLogoutEl = document.getElementById('btn-admin-logout');
+    const lockEnvBadgeEl = document.getElementById('lock-env-badge');
+
+    const ADMIN_TOKEN_PREFIX = '900mhz_admin_token_';
+    let currentAdminToken = '';
 
     // ---------------------------------------------------------
     // 1. Build Unified 8-Digit SVG Scene Once (No DOM Thrashing)
@@ -397,17 +472,39 @@
       });
     }
 
+    function createZeroMatrix() {
+      return Array.from({ length: ESP32Animations.NUM_DIGITS }, () =>
+        Array(ESP32Animations.NUM_SEGS).fill(0)
+      );
+    }
+
     function getCurrentPayload() {
-      return [1, Number.parseInt(selectedModeId, 10), Number.parseInt(selectedSpeed, 10)];
+      return [
+        Number.parseInt(selectedModeId, 10),
+        createZeroMatrix(),
+        Number.parseInt(selectedSpeed, 10)
+      ];
+    }
+
+    function formatPayloadSummary(payload) {
+      const [modeId, matrixVal, speedVal] = payload;
+      const litCount = Array.isArray(matrixVal)
+        ? matrixVal.reduce(
+            (sum, row) => sum + (Array.isArray(row) ? row.filter((v) => v === 1).length : 0),
+            0
+          )
+        : 0;
+      const matrixLabel = litCount > 0 ? `8×7(${litCount}亮)` : '8×7(0)';
+      return `[${modeId}, ${matrixLabel}, ${speedVal}]`;
     }
 
     function syncControlReadouts() {
       const mode = ESP32Animations.getModeById(selectedModeId);
-      const payloadStr = JSON.stringify(getCurrentPayload());
+      const summaryStr = formatPayloadSummary(getCurrentPayload());
       previewModeBadgeEl.textContent = `${mode.code} · SPD ${selectedSpeed}`;
       hudFormulaEl.textContent = mode.formulaNote;
-      submitPayloadPreviewEl.textContent = `esp32-msg → ${payloadStr}`;
-      btnEmitLabelEl.textContent = `送出指令 ${payloadStr}`;
+      submitPayloadPreviewEl.textContent = `esp32-msg → ${summaryStr}`;
+      btnEmitLabelEl.textContent = `送出指令 ${summaryStr}`;
     }
 
     function renderSpeedButtons() {
@@ -538,21 +635,80 @@
 
     function updateServerActiveState(payload, fromBroadcast) {
       if (!Array.isArray(payload) || payload.length !== 3) return;
-      const [cmd, modeId, speedVal] = payload;
+      const [modeId, matrixVal, speedVal] = payload;
       const mode = ESP32Animations.MODES.find((m) => m.id === Number(modeId));
-      const payloadStr = JSON.stringify([cmd, modeId, speedVal]);
+      const summaryStr = formatPayloadSummary([modeId, matrixVal, speedVal]);
 
-      serverActiveModeEl.textContent = `${payloadStr}`;
+      serverActiveModeEl.textContent = summaryStr;
       serverActiveModeEl.className = 'font-semibold tabular-nums text-emerald-700';
 
       if (fromBroadcast) {
-        const modeDesc = mode ? `${mode.name} · 速度 ${speedVal}` : `MODE ${modeId} · 速度 ${speedVal}`;
-        submitStatusMsgEl.textContent = `[${formatTime(new Date())}] 伺服器已廣播 esp32-msg = ${payloadStr} (${modeDesc})`;
+        const modeDesc =
+          Number(modeId) === 0
+            ? `觀眾訊息 (MODE 0) · 速度 ${speedVal}`
+            : mode
+            ? `${mode.name} · 速度 ${speedVal}`
+            : `MODE ${modeId} · 速度 ${speedVal}`;
+        submitStatusMsgEl.textContent = `[${formatTime(new Date())}] 伺服器已廣播 esp32-msg = ${summaryStr} (${modeDesc})`;
         submitStatusMsgEl.className = 'text-xs font-mono text-emerald-700 font-semibold';
       }
     }
 
-    function connectSocket(env) {
+    function getTokenStorageKey(env) {
+      return `${ADMIN_TOKEN_PREFIX}${env}`;
+    }
+
+    function showAdminLock(errMsg = '') {
+      currentAdminToken = '';
+      lockEnvBadgeEl.textContent = currentEnv.toUpperCase();
+      adminLoginErrorEl.textContent = errMsg;
+      adminLockOverlayEl.classList.remove('hidden');
+      btnAdminLogoutEl.classList.add('hidden');
+      setTimeout(() => adminPasswordInputEl.focus(), 50);
+    }
+
+    function hideAdminLock() {
+      adminLoginErrorEl.textContent = '';
+      adminPasswordInputEl.value = '';
+      adminLockOverlayEl.classList.add('hidden');
+      btnAdminLogoutEl.classList.remove('hidden');
+    }
+
+    async function verifyOrPromptAdmin(env) {
+      currentEnv = env;
+      localStorage.setItem(ENV_STORAGE_KEY, env);
+      updateEndpointUI();
+
+      const savedToken = sessionStorage.getItem(getTokenStorageKey(env)) || '';
+      if (!savedToken) {
+        if (socket) {
+          socket.removeAllListeners();
+          socket.disconnect();
+        }
+        setConnectionState('offline');
+        showAdminLock('');
+        return;
+      }
+
+      try {
+        const res = await fetch(`${SOCKET_ENDPOINTS[env]}/api/admin/verify`, {
+          headers: { Authorization: `Bearer ${savedToken}` }
+        });
+        if (res.ok) {
+          currentAdminToken = savedToken;
+          hideAdminLock();
+          connectSocket(env, savedToken);
+          return;
+        }
+      } catch {
+        // Fallback to lock screen on network failure
+      }
+
+      sessionStorage.removeItem(getTokenStorageKey(env));
+      showAdminLock('連線驗證逾時或密碼已變更，請重新登入');
+    }
+
+    function connectSocket(env, adminToken) {
       currentEnv = env;
       localStorage.setItem(ENV_STORAGE_KEY, env);
       updateEndpointUI();
@@ -565,7 +721,8 @@
 
       const targetUrl = SOCKET_ENDPOINTS[env];
       socket = io(targetUrl, {
-        transports: ['websocket', 'polling']
+        transports: ['websocket', 'polling'],
+        auth: { adminToken }
       });
 
       socket.on('connect', () => {
@@ -580,6 +737,11 @@
         setConnectionState('offline');
       });
 
+      socket.on('auth_error', (err) => {
+        sessionStorage.removeItem(getTokenStorageKey(currentEnv));
+        showAdminLock(err?.error || '管理員憑證失效，請重新輸入密碼');
+      });
+
       socket.on('esp32_state_init', (activeState) => {
         updateServerActiveState(activeState, false);
       });
@@ -589,16 +751,62 @@
       });
     }
 
+    adminLoginFormEl.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const password = adminPasswordInputEl.value;
+      if (!password) return;
+
+      btnAdminUnlockEl.disabled = true;
+      btnAdminUnlockEl.textContent = '驗證中...';
+      adminLoginErrorEl.textContent = '';
+
+      try {
+        const res = await fetch(`${SOCKET_ENDPOINTS[currentEnv]}/api/admin/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.token) {
+          adminLoginErrorEl.textContent = data.error || '驗證失敗，請確認密碼';
+        } else {
+          currentAdminToken = data.token;
+          sessionStorage.setItem(getTokenStorageKey(currentEnv), data.token);
+          hideAdminLock();
+          connectSocket(currentEnv, data.token);
+        }
+      } catch {
+        adminLoginErrorEl.textContent = '無法連線至伺服器，請確認端點是否啟動';
+      } finally {
+        btnAdminUnlockEl.disabled = false;
+        btnAdminUnlockEl.textContent = '驗證並解鎖';
+      }
+    });
+
+    btnAdminLogoutEl.addEventListener('click', () => {
+      sessionStorage.removeItem(getTokenStorageKey(currentEnv));
+      if (socket) {
+        socket.removeAllListeners();
+        socket.disconnect();
+      }
+      setConnectionState('offline');
+      showAdminLock('控制台已鎖定');
+    });
+
     btnEnvProd.addEventListener('click', () => {
-      if (currentEnv !== 'prod') connectSocket('prod');
+      if (currentEnv !== 'prod') verifyOrPromptAdmin('prod');
     });
 
     btnEnvLocal.addEventListener('click', () => {
-      if (currentEnv !== 'local') connectSocket('local');
+      if (currentEnv !== 'local') verifyOrPromptAdmin('local');
     });
 
-    // Emit [1, modeIndex, speedValue] on 'esp32-msg' ONLY when Submit button is clicked
+    // Emit [mode (1..3), 8x7 zero matrix, speed] on 'esp32-msg' ONLY when Submit button is clicked
     btnEmitEsp32.addEventListener('click', () => {
+      if (!currentAdminToken) {
+        showAdminLock('請先輸入管理員密碼解鎖');
+        return;
+      }
       if (!socket || !socket.connected) {
         submitStatusMsgEl.textContent = '尚未連線至伺服器，無法送出 esp32-msg 指令。';
         submitStatusMsgEl.className = 'text-xs font-mono text-red-600 font-semibold';
@@ -608,7 +816,7 @@
       const payload = getCurrentPayload();
       socket.emit('esp32-msg', payload);
 
-      submitStatusMsgEl.textContent = `[${formatTime(new Date())}] 已送出 esp32-msg = ${JSON.stringify(payload)}，等待伺服器廣播確認...`;
+      submitStatusMsgEl.textContent = `[${formatTime(new Date())}] 已送出 esp32-msg = ${formatPayloadSummary(payload)}，等待伺服器廣播確認...`;
       submitStatusMsgEl.className = 'text-xs font-mono text-neutral-700';
     });
 
@@ -616,7 +824,7 @@
     initSvgCanvas();
     renderSpeedButtons();
     selectMode(1);
-    connectSocket(currentEnv);
+    verifyOrPromptAdmin(currentEnv);
     requestAnimationFrame(animationTick);
   </script>
 </body>
