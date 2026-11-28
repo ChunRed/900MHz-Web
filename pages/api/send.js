@@ -82,7 +82,7 @@ function checkRateLimit(ip) {
 }
 
 async function verifyTurnstile(token, ip) {
-  const secretKey = process.env.TURNSTILE_SECRET_KEY || "";
+  const secretKey = (process.env.TURNSTILE_SECRET_KEY || "").trim();
 
   if (!secretKey) {
     if (process.env.NODE_ENV === "production") {
@@ -156,7 +156,7 @@ export default async function handler(req, res) {
     "https://900mhz-server.nosidehere.space"
   ).replace(/\/+$/, "");
 
-  const internalSecret = process.env.INTERNAL_API_SECRET || "";
+  const internalSecret = (process.env.INTERNAL_API_SECRET || "").trim();
   if (!internalSecret) {
     return res.status(503).json({
       ok: false,

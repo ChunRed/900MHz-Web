@@ -51,7 +51,9 @@ const LAST_SEND_AT_KEY = "900mhz_last_send_at";
 const LAST_SEND_RECORD_KEY = "900mhz_last_send_record";
 const SOCKET_URL =
   process.env.NEXT_PUBLIC_SOCKET_URL || "https://900mhz-server.nosidehere.space";
-const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || "";
+const TURNSTILE_SITE_KEY = (
+  process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || ""
+).trim();
 
 const checkIsMobilePhone = () => {
   if (typeof window === "undefined" || typeof navigator === "undefined") {
@@ -87,6 +89,7 @@ export default function Home() {
   const lastSelfSentRef = useRef(null);
   const turnstileContainerRef = useRef(null);
   const turnstileWidgetIdRef = useRef(null);
+  const turnstileTokenRef = useRef("");
   const turnstilePendingRef = useRef(null);
 
   // 裝置檢測：null=尚未檢測、true=手機載體、false=非手機載體（顯示提示並鎖定）
@@ -206,7 +209,7 @@ export default function Home() {
     sendRafRef.current = requestAnimationFrame(step);
   };
 
-  // 初始化 Cloudflare Turnstile 隱形人機驗證元件
+  // 初始化 Cloudflare Turnstile 隱形人機驗證元件（採官方推薦 execution: "render" 背景預先取票，避免 reset+execute 同時呼叫觸發 600010）
   const initTurnstileWidget = useCallback(() => {
     if (
       !TURNSTILE_SITE_KEY ||
@@ -223,38 +226,69 @@ export default function Home() {
       {
         sitekey: TURNSTILE_SITE_KEY,
         appearance: "interaction-only",
-        execution: "execute",
+        execution: "render",
+        retry: "auto",
+        "refresh-expired": "auto",
         callback: (token) => {
+          turnstileTokenRef.current = token;
           const pending = turnstilePendingRef.current;
           if (pending) {
             clearTimeout(pending.timer);
             turnstilePendingRef.current = null;
+            turnstileTokenRef.current = "";
             pending.resolve(token);
           }
         },
-        "error-callback": () => {
+        "error-callback": (errorCode) => {
+          console.warn("[Turnstile] error-callback:", errorCode);
+          turnstileTokenRef.current = "";
           const pending = turnstilePendingRef.current;
           if (pending) {
             clearTimeout(pending.timer);
             turnstilePendingRef.current = null;
-            pending.reject(new Error("人機安全驗證失敗，請稍候再試"));
+            pending.reject(
+              new Error(`人機安全驗證失敗（代碼 ${errorCode || "unknown"}），請重新整理或確認網域設定`)
+            );
           }
+          // 回傳 true 允許 Turnstile 自動重試瞬時錯誤
+          return true;
         },
         "expired-callback": () => {
-          if (window.turnstile && turnstileWidgetIdRef.current !== null) {
-            window.turnstile.reset(turnstileWidgetIdRef.current);
-          }
+          turnstileTokenRef.current = "";
         },
       }
     );
+  }, []);
+
+  const resetTurnstileWidget = useCallback(() => {
+    turnstileTokenRef.current = "";
+    if (
+      typeof window !== "undefined" &&
+      window.turnstile &&
+      turnstileWidgetIdRef.current !== null
+    ) {
+      try {
+        window.turnstile.reset(turnstileWidgetIdRef.current);
+      } catch {
+        // 忽略重置異常
+      }
+    }
   }, []);
 
   const requestTurnstileToken = useCallback(() => {
     if (!TURNSTILE_SITE_KEY) {
       return Promise.resolve("");
     }
+    // 優先直接取用背景已驗證完成的一次性 Token（零延遲、不會觸發 600010）
+    if (turnstileTokenRef.current) {
+      const readyToken = turnstileTokenRef.current;
+      turnstileTokenRef.current = "";
+      return Promise.resolve(readyToken);
+    }
     if (typeof window === "undefined" || !window.turnstile) {
-      return Promise.reject(new Error("安全驗證元件尚未載入完成，請稍候 1 秒再按傳送"));
+      return Promise.reject(
+        new Error("安全驗證元件尚未載入完成，請稍候 1 秒再按傳送")
+      );
     }
     if (turnstileWidgetIdRef.current === null) {
       initTurnstileWidget();
@@ -268,12 +302,12 @@ export default function Home() {
       const timer = setTimeout(() => {
         turnstilePendingRef.current = null;
         reject(new Error("安全驗證逾時，請再試一次"));
-      }, 8000);
+      }, 10000);
 
       turnstilePendingRef.current = { resolve, reject, timer };
       try {
+        // 僅在目前尚無可用 Token 時觸發一次 reset，由 execution: "render" 自動取得新 Token
         window.turnstile.reset(widgetId);
-        window.turnstile.execute(widgetId);
       } catch {
         clearTimeout(timer);
         turnstilePendingRef.current = null;
@@ -281,6 +315,12 @@ export default function Home() {
       }
     });
   }, [initTurnstileWidget]);
+
+  useEffect(() => {
+    if (isMobileDevice === true && TURNSTILE_SITE_KEY) {
+      initTurnstileWidget();
+    }
+  }, [isMobileDevice, initTurnstileWidget]);
 
   const handleClickSend = async () => {
     if (
@@ -386,6 +426,8 @@ export default function Home() {
       setSendNoticeType("error");
       setIsSendModalOpen(true);
     } finally {
+      // 每次請求結束後在背景自動重置 Turnstile，預先準備下一次傳送用的一次性 Token
+      resetTurnstileWidget();
       setIsSubmittingSend(false);
     }
   };
